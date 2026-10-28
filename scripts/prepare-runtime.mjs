@@ -30,6 +30,14 @@ if (!["darwin", "win32"].includes(process.platform))
   throw new Error("Prepare desktop resources on macOS or Windows");
 const npmCli = process.env.npm_execpath;
 if (!npmCli) throw new Error("Run through npm run runtime:prepare");
+// Git Bash's GNU tar interprets drive letters as remote archive hosts.
+// Windows ships bsdtar, which accepts native paths and Node's ZIP archives.
+if (process.platform === "win32" && !process.env.SystemRoot)
+  throw new Error("SystemRoot is required to locate Windows tar.exe");
+const tar =
+  process.platform === "win32"
+    ? path.join(process.env.SystemRoot, "System32", "tar.exe")
+    : "tar";
 const resources = path.join(root, "src-tauri/resources");
 const staging = path.join(resources, `.runtime-${process.pid}`);
 const destination = path.join(resources, "runtime");
@@ -80,7 +88,7 @@ try {
     throw new Error("Source archive checksum mismatch; refusing to extract");
   const tavern = path.join(staging, "sillytavern");
   await mkdir(tavern);
-  run("tar", ["-xzf", archive, "--strip-components=1", "-C", tavern], root);
+  run(tar, ["-xzf", archive, "--strip-components=1", "-C", tavern], root);
   run(
     process.execPath,
     [npmCli, "ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"],
@@ -105,7 +113,7 @@ try {
       archivePath,
       artifact.sha256,
     );
-    run("tar", ["-xf", archivePath, "-C", extracted], root);
+    run(tar, ["-xf", archivePath, "-C", extracted], root);
     nodeDirectories.push(
       path.join(extracted, artifact.file.replace(/\.(tar\.gz|zip)$/, "")),
     );

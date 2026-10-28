@@ -9,6 +9,10 @@
 - 独立数据目录、启动就绪检查、单实例和端口冲突保护。
 - Windows / macOS CI 与服务器磁盘分发流程。
 
+### Fixed
+
+- Windows 构建使用系统自带的 tar.exe，避免 Git Bash 将盘符识别为远程归档地址。
+
 ### Known limitations
 
 - 尚未发布正式安装包，签名、公证和各平台真实安装验收待完成。
