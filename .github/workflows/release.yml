@@ -150,12 +150,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
-      - name: Preserve notarized update archive if later packaging fails
+      - name: Preserve signed app archives if later notarization or packaging fails
         if: failure() && runner.os == 'macOS'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: macos-signed-updater-recovery
-          path: src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz*
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz*
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/signed-app-recovery.zip
           if-no-files-found: ignore
           retention-days: 14
           compression-level: 0
