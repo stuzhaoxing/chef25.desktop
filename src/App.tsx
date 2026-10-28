@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import UpdatePanel from "./UpdatePanel";
+import { version } from "../package.json";
 import {
   BookOpen,
   ChefHat,
@@ -32,6 +34,7 @@ export default function App() {
   const [status, setStatus] = useState<Status>(initial);
   const [tab, setTab] = useState("tavern");
   const [busy, setBusy] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
   const inFlight = useRef(false);
   const native = isTauri();
@@ -59,7 +62,7 @@ export default function App() {
   async function action(
     command: "start_service" | "stop_service" | "open_tavern",
   ) {
-    if (inFlight.current) return;
+    if (inFlight.current || updating) return;
     inFlight.current = true;
     setBusy(true);
     setError("");
@@ -111,7 +114,7 @@ export default function App() {
             <br />
             做一点小事。
           </p>
-          <span>v0.1.0 · 开发预览</span>
+          <span>v{version} · 开发预览</span>
         </div>
       </aside>
       <main className="main">
@@ -150,7 +153,7 @@ export default function App() {
               </p>
               <button
                 className="primary"
-                disabled={!native || busy}
+                disabled={!native || busy || updating}
                 onClick={() =>
                   void action(
                     status.phase === "running"
@@ -181,7 +184,7 @@ export default function App() {
               {status.phase === "running" && (
                 <button
                   className="stop"
-                  disabled={busy}
+                  disabled={busy || updating}
                   onClick={() => void action("stop_service")}
                 >
                   <Square size={11} /> 停止服务
@@ -264,6 +267,7 @@ export default function App() {
             </p>
           </section>
         )}
+        <UpdatePanel disabled={busy} onBusyChange={setUpdating} />
         {error && (
           <div className="error" role="alert">
             {error}

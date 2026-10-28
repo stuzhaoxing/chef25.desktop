@@ -1,4 +1,5 @@
 mod service;
+mod updates;
 
 use service::{Service, Status};
 use std::sync::Arc;
@@ -81,6 +82,8 @@ fn open_tavern(
 
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::Updates::default())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -103,7 +106,9 @@ pub fn run() {
             service_status,
             start_service,
             stop_service,
-            open_tavern
+            open_tavern,
+            updates::check_update,
+            updates::install_update
         ])
         .build(tauri::generate_context!())
         .expect("failed to build Chef25 application");

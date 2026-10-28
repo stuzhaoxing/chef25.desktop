@@ -9,6 +9,7 @@ import {
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { sha256 } from "./runtime-utils.mjs";
+import { verifyUpdateSignature } from "./verify-update-signature.mjs";
 
 const root = process.cwd();
 const { version } = JSON.parse(await readFile("package.json", "utf8"));
@@ -19,6 +20,8 @@ if (!/^\d+\.\d+\.\d+$/.test(version))
 const output = path.join(root, "artifacts/distribution");
 await mkdir(output, { recursive: true });
 const platforms = {};
+const updates = {};
+const config = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
 for (const id of ["darwin-universal", "win32-x64"]) {
   const extension = id.startsWith("darwin") ? ".dmg" : ".exe";
   const name = `Chef25_${version}_${id}${extension}`;
@@ -32,6 +35,25 @@ for (const id of ["darwin-universal", "win32-x64"]) {
     url: `/downloads/v${version}/${name}`,
     sha256: digest,
     size: (await stat(source)).size,
+    signing: id === "darwin-universal" ? "notarized" : "unsigned",
+  };
+  const updateName =
+    id === "darwin-universal" ? `Chef25_${version}_${id}.app.tar.gz` : name;
+  const updatePath = path.join(root, "artifacts", id, updateName);
+  const signature = (await readFile(updatePath + ".sig", "utf8")).trim();
+  verifyUpdateSignature(
+    await readFile(updatePath),
+    signature,
+    config.plugins.updater.pubkey,
+    version,
+  );
+  if (updateName !== name)
+    await copyFile(updatePath, path.join(output, updateName));
+  updates[id] = {
+    url: `/downloads/v${version}/${updateName}`,
+    sha256: await sha256(updatePath),
+    size: (await stat(updatePath)).size,
+    signature,
   };
 }
 const sourceName = `Chef25_${version}_source.tar.gz`;
@@ -54,12 +76,40 @@ const release = {
   preview: true,
   commit: git.stdout.trim(),
   platforms,
+  updates,
   source: {
     url: `/downloads/v${version}/${sourceName}`,
     sha256: await sha256(path.join(output, sourceName)),
     size: (await stat(path.join(output, sourceName))).size,
   },
 };
+const aliases = {
+  "darwin-aarch64": "darwin-universal",
+  "darwin-x86_64": "darwin-universal",
+  "windows-x86_64": "win32-x64",
+};
+await writeFile(
+  path.join(output, "updater.json"),
+  JSON.stringify(
+    {
+      version,
+      notes:
+        "新增应用内检查更新与确认安装；macOS 安装包通过 Developer ID 签名及 Apple 公证。更新会保留角色、聊天和配置。",
+      pub_date: new Date().toISOString(),
+      platforms: Object.fromEntries(
+        Object.entries(aliases).map(([target, id]) => [
+          target,
+          {
+            url: "https://www.chef25.com" + updates[id].url,
+            signature: updates[id].signature,
+          },
+        ]),
+      ),
+    },
+    null,
+    2,
+  ) + "\n",
+);
 await writeFile(
   path.join(output, "distribution.json"),
   JSON.stringify(release, null, 2) + "\n",

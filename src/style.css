@@ -400,3 +400,43 @@ a:focus-visible {
     animation: none;
   }
 }
+.updates {
+  margin-top: 24px;
+  padding: 16px 20px;
+  border: 1px solid #e2e4da;
+  border-radius: 14px;
+  background: #f4f5ef;
+  font-size: 13px;
+}
+.updates-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.updates button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: #5b664d;
+  cursor: pointer;
+  padding: 7px 0;
+}
+.updates button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.updates p {
+  line-height: 1.7;
+  color: #686b62;
+}
+.update-notes {
+  white-space: pre-wrap;
+  max-height: 130px;
+  overflow-y: auto;
+}
+.update-confirm button + button {
+  margin-left: 20px;
+}
