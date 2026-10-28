@@ -12,6 +12,7 @@
 ### Fixed
 
 - Windows 构建使用系统自带的 tar.exe，避免 Git Bash 将盘符识别为远程归档地址。
+- macOS 构建使用系统 HTTPS 客户端下载 Node 归档，增加连接超时与有限重试，保留固定 SHA-256 校验。
 
 ### Known limitations
 

@@ -55,9 +55,45 @@ function run(command, args, cwd) {
 }
 
 async function download(url, destination, expectedHash) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(180_000) });
-  if (!response.ok) throw new Error(`Download failed: HTTP ${response.status}`);
-  await writeFile(destination, Buffer.from(await response.arrayBuffer()));
+  console.log(
+    `Downloading verified runtime archive: ${path.basename(destination)}`,
+  );
+  if (process.platform === "darwin") {
+    // Use the system TLS client and IPv4 on macOS runners, where Node's fetch
+    // can stall on the distribution CDN. Retries never bypass the hash check.
+    run(
+      "/usr/bin/curl",
+      [
+        "--fail",
+        "--location",
+        "--silent",
+        "--show-error",
+        "--ipv4",
+        "--proto",
+        "=https",
+        "--proto-redir",
+        "=https",
+        "--connect-timeout",
+        "20",
+        "--max-time",
+        "180",
+        "--retry",
+        "2",
+        "--retry-delay",
+        "2",
+        "--retry-all-errors",
+        "--output",
+        destination,
+        url,
+      ],
+      root,
+    );
+  } else {
+    const response = await fetch(url, { signal: AbortSignal.timeout(180_000) });
+    if (!response.ok)
+      throw new Error(`Download failed: HTTP ${response.status}`);
+    await writeFile(destination, Buffer.from(await response.arrayBuffer()));
+  }
   if ((await sha256(destination)) !== expectedHash)
     throw new Error("Archive checksum mismatch; refusing to extract");
 }
