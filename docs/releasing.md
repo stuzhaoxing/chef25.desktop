@@ -46,7 +46,9 @@ CI 的进程存活与后端测试不能替代各平台原生窗口交互验收�
 
 macOS 环境额外配置 `APPLE_CERTIFICATE`（P12 的 base64）、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_PASSWORD`（应用专用密码）和 `APPLE_TEAM_ID`。账户标识与诊断不写入公开日志。Developer ID 证书的发布者身份属于安装包签名的公开信息；账户密码和私钥始终保密。
 
-`release-macos.py` 使用临时钥匙串，依次签名 Node、更新运行时哈希、签名应用、公证和装订应用、生成并签名更新归档、创建并签名 DMG、公证和装订 DMG。校验包括 hardened runtime、两个 CPU 架构、Gatekeeper、装订票据，以及重新解压后的应用。任何一步失败均禁止收集产物。手工运行需先构建 Universal app bundle，并在私有环境加载同样的凭据。
+P12 必须包含 Developer ID 中间证书链，避免只在开发者本机已有证书的环境成功。
+
+`release-macos.py` 使用临时钥匙串并在退出时恢复原搜索列表，依次签名 Node、更新运行时哈希、签名应用、公证和装订应用、生成并签名更新归档、创建并签名 DMG、公证和装订 DMG。校验包括 hardened runtime、两个 CPU 架构、Gatekeeper、装订票据，以及重新解压后的应用。任何一步失败均禁止收集产物。手工运行需先构建 Universal app bundle，并在私有环境加载同样的凭据。
 
 更新签名绑定应用版本，客户端开启 `requireSignedVersion`。macOS 更新归档是 `.app.tar.gz`；Windows 复用 EXE。官网仍只提供一个 DMG 和一个 EXE。客户端仅在用户确认后安装，先下载并验证更新，再停止自有酒馆进程并重启；应用数据目录不受覆盖。0.1.0 需手动安装一次 0.2.0。
 

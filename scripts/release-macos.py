@@ -6,7 +6,9 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shlex
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -22,7 +24,16 @@ def run(arguments):
     result = subprocess.run(arguments, capture_output=True, text=True, cwd=ROOT)
     if result.returncode:
         # Signing and Apple output may contain account names/IDs. Keep it out of public CI logs.
-        raise RuntimeError(f'{Path(arguments[0]).name} failed; inspect the private signing/notary diagnostics')
+        detail = result.stdout + result.stderr
+        categories = {
+            'unable to build chain': 'certificate chain is incomplete',
+            'errSecInternalComponent': 'keychain access or certificate trust failed',
+            'no identity found': 'signing identity was not found',
+            'specified item could not be found': 'keychain item was not found',
+            'timestamp service': 'Apple timestamp service failed',
+        }
+        reason = next((message for needle, message in categories.items() if needle in detail), 'inspect private signing/notary diagnostics')
+        raise RuntimeError(f'{Path(arguments[0]).name} failed: {reason}')
     return result.stdout + result.stderr
 
 
@@ -57,14 +68,17 @@ def verify_app(app):
 
 
 def main():
-    if not APP.is_dir():
+    preflight = sys.argv[1:] == ['--preflight']
+    if not preflight and not APP.is_dir():
         raise RuntimeError('Build the Universal app bundle first')
     version = json.loads((ROOT / 'package.json').read_text())['version']
-    (BUNDLE / 'macos/signing-status.json').unlink(missing_ok=True)
+    if not preflight:
+        (BUNDLE / 'macos/signing-status.json').unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(prefix='chef25-signing-') as temporary:
         temp = Path(temporary)
         keychain = temp / 'build.keychain-db'
         keychain_args = []
+        original_keychains = None
         try:
             if os.environ.get('APPLE_CERTIFICATE'):
                 certificate = temp / 'certificate.p12'
@@ -76,7 +90,18 @@ def main():
                 run(['security', 'unlock-keychain', '-p', password, str(keychain)])
                 run(['security', 'import', str(certificate), '-k', str(keychain), '-P', os.environ['APPLE_CERTIFICATE_PASSWORD'], '-T', '/usr/bin/codesign'])
                 run(['security', 'set-key-partition-list', '-S', 'apple-tool:,apple:', '-s', '-k', password, str(keychain)])
+                original_keychains = shlex.split(run(['security', 'list-keychains', '-d', 'user']))
+                run(['security', 'list-keychains', '-d', 'user', '-s', str(keychain), *original_keychains])
                 keychain_args = ['--keychain', str(keychain)]
+            if preflight:
+                source = temp / 'signing-check.c'
+                executable = temp / 'signing-check'
+                source.write_text('int main(void) { return 0; }\n')
+                run(['clang', '-arch', 'arm64', '-arch', 'x86_64', str(source), '-o', str(executable)])
+                run(['codesign', '--force', '--timestamp', '--options', 'runtime', '--sign', IDENTITY, *keychain_args, str(executable)])
+                run(['codesign', '--verify', '--strict', str(executable)])
+                print('CI Developer ID certificate and keychain preflight passed', flush=True)
+                return
             node = APP / 'Contents/Resources/runtime/node'
             run(['codesign', '--force', '--timestamp', '--options', 'runtime', '--entitlements', str(ROOT / 'src-tauri/node-entitlements.plist'), '--sign', IDENTITY, *keychain_args, str(node)])
             manifest_path = APP / 'Contents/Resources/runtime/manifest.json'
@@ -114,6 +139,8 @@ def main():
             (BUNDLE / 'macos/signing-status.json').write_text(json.dumps({'macos': 'notarized', 'updater': 'signed', 'version': version}) + '\n')
             print('Developer ID, app/DMG notarization, stapled updater, Gatekeeper and Universal checks passed', flush=True)
         finally:
+            if original_keychains is not None:
+                subprocess.run(['security', 'list-keychains', '-d', 'user', '-s', *original_keychains], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if keychain.exists():
                 subprocess.run(['security', 'delete-keychain', str(keychain)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

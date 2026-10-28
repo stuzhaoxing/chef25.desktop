@@ -9,6 +9,10 @@
 - macOS Universal 应用、内置 Node 和 DMG 的 Developer ID 签名，以及应用和 DMG 的 Apple 公证、票据装订和 Gatekeeper 检查。
 - 独立 macOS / Windows 签名环境，服务器发布更新清单，官网保留两个安装包。
 
+### Fixed
+
+- CI 临时钥匙串加入并恢复用户搜索列表，签名凭据包含 Apple 中间证书；签名错误仅公开脱敏类别。
+
 ### Migration
 
 - 0.1.0 用户需手动安装 0.2.0；以后可通过应用内更新。
