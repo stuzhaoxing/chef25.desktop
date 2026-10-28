@@ -41,11 +41,14 @@ jobs:
           - os: macos-15
             id: darwin-universal
             bundles: dmg
+            environment: desktop-macos-release
           - os: windows-2022
             id: win32-x64
             bundles: nsis
+            environment: desktop-windows-release
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    environment: ${{ matrix.environment }}
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
@@ -83,9 +86,24 @@ jobs:
           arch -x86_64 src-tauri/resources/runtime/node --version
       - name: Build macOS Universal installer
         if: runner.os == 'macOS'
-        run: npm run desktop:build -- --target universal-apple-darwin --bundles dmg
+        run: npm run desktop:build -- --target universal-apple-darwin --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - name: Sign and notarize macOS app, updater and DMG
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: python3 scripts/release-macos.py
       - name: Build Windows installer
         if: runner.os == 'Windows'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run desktop:build -- --bundles nsis
       - name: Verify installer container
         if: runner.os == 'macOS'
@@ -165,3 +183,5 @@ jobs:
           curl --fail --retry 3 https://www.chef25.com/downloads/latest.json -o latest.json
           node --input-type=module -e 'import fs from "node:fs"; const actual=JSON.parse(fs.readFileSync("latest.json")); const expected=JSON.parse(fs.readFileSync("artifacts/distribution/distribution.json")); if(JSON.stringify(actual)!==JSON.stringify(expected)) throw new Error("Published manifest differs");'
           node --input-type=module -e 'import fs from "node:fs"; const manifest=JSON.parse(fs.readFileSync("latest.json")); for(const item of Object.values(manifest.platforms)){const res=await fetch("https://www.chef25.com"+item.url,{method:"HEAD"}); if(!res.ok || Number(res.headers.get("content-length"))!==item.size) throw new Error("Download header mismatch");}'
+          curl --fail --retry 3 https://www.chef25.com/downloads/updater.json -o updater.json
+          cmp updater.json artifacts/distribution/updater.json

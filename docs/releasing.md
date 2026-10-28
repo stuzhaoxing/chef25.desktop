@@ -2,17 +2,17 @@
 
 ## 当前发布渠道
 
-目前仅提供 **开发预览** 流程。安装包未配置 Windows Authenticode、Apple Developer ID 签名与公证，不应称为正式发行版。官网必须显示预览和未签名状态。正式发布需要补齐签名、公证、第三方许可审查和真实设备验收后再扩展流水线。
+目前仅提供 **开发预览** 流程。0.2.0 起 macOS 发布必须通过 Developer ID 签名、Apple 公证与 Gatekeeper 检查；Windows 尚无 Authenticode。官网按平台显示实际签名状态，仍保留预览标记。CI 不替代真实设备交互验收。
 
 ## 构建与同步
 
-1. 在同一个 PR 更新 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`Cargo.lock`、`tauri.conf.json` 和界面版本，补齐 CHANGELOG。
+1. 在同一个 PR 更新 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`Cargo.lock`、`tauri.conf.json` （界面从包版本读取），补齐 CHANGELOG。
 2. 合并到 main，确认 Quality checks 通过。
 3. Actions → **Build and publish desktop preview** → Run workflow。首次检查可不选 publish，仅保存产物；选中 publish 后两个平台通过才自动同步服务器。
 4. 两个安装包：macOS Universal（Apple Silicon + Intel）和 Windows x64。macOS runner 交叉编译两个 Rust 架构并合并，内置 Node.js 也合并为 Universal；CI 验证两种 Node 架构均能执行。
    Linux 准备任务先下载固定版本的上游归档并校验，通过 Actions artifact 传给两个构建任务。构建任务通过 `CHEF25_RUNTIME_ARCHIVES` 读取归档并再次校验，避开 macOS runner 到 Node CDN 的慢速链路；缓存缺失或哈希不符直接失败。
 5. 流水线执行格式、类型、单测、Clippy、真实酒馆启停与数据保留测试。Windows 另做安装、进程存活与卸载冒烟；macOS 校验最终 DMG 容器。
-6. 汇总两个安装包及其 SHA-256，并生成匹配当前 commit 的源码归档。所有产物整体通过受限 SSH 账号上传，接收端校验后原子更新下载清单。
+6. 汇总两个安装包及其 SHA-256，并生成匹配当前 commit 的源码归档。所有产物整体通过受限 SSH 账号上传，接收端校验哈希、签名结构及清单一致性后分别原子更新 `latest.json` 和 `updater.json`。发布汇总任务及客户端会执行密码学签名验证。
 
 源码与安装包位于同一个 `/downloads/v<version>/`，同版本文件不可覆盖。代码修复必须升级版本号。仅网络故障可重试完全相同的产物；重新构建可能产生不同字节，因此不得覆盖已发布版本。
 
@@ -39,3 +39,15 @@
 - 对比已有服务健康与进程状态，确认下载发布未干预它们。
 
 CI 的进程存活与后端测试不能替代各平台原生窗口交互验收，也不代表模型服务可用。
+
+## 签名与应用内更新
+
+`desktop-macos-release` 和 `desktop-windows-release` 环境都限制 main 分支，并配置 `TAURI_SIGNING_PRIVATE_KEY`（密钥内容）与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。公钥提交到 Tauri 配置，私钥必须离线备份；丢失后旧客户端无法信任新签名。
+
+macOS 环境额外配置 `APPLE_CERTIFICATE`（P12 的 base64）、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_PASSWORD`（应用专用密码）和 `APPLE_TEAM_ID`。账户标识与诊断不写入公开日志。Developer ID 证书的发布者身份属于安装包签名的公开信息；账户密码和私钥始终保密。
+
+`release-macos.py` 使用临时钥匙串，依次签名 Node、更新运行时哈希、签名应用、公证和装订应用、生成并签名更新归档、创建并签名 DMG、公证和装订 DMG。校验包括 hardened runtime、两个 CPU 架构、Gatekeeper、装订票据，以及重新解压后的应用。任何一步失败均禁止收集产物。手工运行需先构建 Universal app bundle，并在私有环境加载同样的凭据。
+
+更新签名绑定应用版本，客户端开启 `requireSignedVersion`。macOS 更新归档是 `.app.tar.gz`；Windows 复用 EXE。官网仍只提供一个 DMG 和一个 EXE。客户端仅在用户确认后安装，先下载并验证更新，再停止自有酒馆进程并重启；应用数据目录不受覆盖。0.1.0 需手动安装一次 0.2.0。
+
+公证失败时用私有诊断查明原因，禁止跳过签名或修改状态标记发布。证书、更新密钥、P12 与账户配置不得提交仓库。发布前运行隐私检查，并在提交后再对实际提交执行检查。

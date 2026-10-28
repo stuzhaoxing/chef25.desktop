@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import importlib.util
 import json
@@ -32,6 +33,47 @@ class ReleaseValidationTests(unittest.TestCase):
     def save_manifest(self):
         (self.root / 'distribution.json').write_text(json.dumps(self.release))
         (self.root / 'SHA256SUMS').write_text('\n'.join(f'{receiver.digest(file)}  {file.name}' for file in sorted(self.root.iterdir()) if file.name != 'SHA256SUMS') + '\n')
+
+    def add_updates(self):
+        self.release['updates'] = {}
+        signature = base64.b64encode(('untrusted comment: fixture\n' + base64.b64encode(b'ED' + b'x' * 72).decode() + '\ntrusted comment: fixture\n' + base64.b64encode(b'x' * 64).decode() + '\n').encode()).decode()
+        for platform, suffix in [('darwin-universal', '.app.tar.gz'), ('win32-x64', '.exe')]:
+            name = f'Chef25_0.1.0_{platform}{suffix}'
+            file = self.root / name
+            if not file.exists():
+                file.write_bytes(b'updater fixture')
+            self.release['updates'][platform] = {'url': '/downloads/v0.1.0/' + name, 'size': file.stat().st_size, 'sha256': receiver.digest(file), 'signature': signature}
+            self.release['platforms'][platform]['signing'] = 'notarized' if platform == 'darwin-universal' else 'unsigned'
+        aliases = {'darwin-aarch64': 'darwin-universal', 'darwin-x86_64': 'darwin-universal', 'windows-x86_64': 'win32-x64'}
+        updater = {'version': '0.1.0', 'platforms': {target: {'url': 'https://www.chef25.com' + self.release['updates'][platform]['url'], 'signature': signature} for target, platform in aliases.items()}}
+        (self.root / 'updater.json').write_text(json.dumps(updater))
+        self.save_manifest()
+
+    def test_accepts_matching_updater_inventory(self):
+        self.add_updates()
+        self.assertEqual(len(receiver.validate(self.root)['updates']), 2)
+
+    def test_rejects_mismatched_updater_manifest(self):
+        self.add_updates()
+        updater = json.loads((self.root / 'updater.json').read_text())
+        updater['platforms']['darwin-aarch64']['url'] = 'https://example.org/update'
+        (self.root / 'updater.json').write_text(json.dumps(updater))
+        self.save_manifest()
+        with self.assertRaisesRegex(ValueError, 'artifact differs'):
+            receiver.validate(self.root)
+
+    def test_rejects_malformed_update_signature(self):
+        self.add_updates()
+        self.release['updates']['darwin-universal']['signature'] = 'invalid'
+        self.save_manifest()
+        with self.assertRaisesRegex(ValueError, 'signature'):
+            receiver.validate(self.root)
+
+    def test_rejects_corrupted_update_archive(self):
+        self.add_updates()
+        (self.root / 'Chef25_0.1.0_darwin-universal.app.tar.gz').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'checksum|size'):
+            receiver.validate(self.root)
 
     def test_accepts_complete_verified_preview(self):
         self.assertEqual(receiver.validate(self.root)['version'], '0.1.0')

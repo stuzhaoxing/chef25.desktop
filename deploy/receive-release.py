@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Forced SSH command for Chef25 downloads; no shell, sudo, or service management."""
 import fcntl
+import base64
 import hashlib
 import json
 import os
@@ -42,6 +43,38 @@ def validate(folder):
         if item['size'] != file.stat().st_size or item['sha256'] != digest(file):
             raise ValueError('Artifact checksum or size mismatch')
         expected.add(filename)
+    updates = release.get('updates')
+    if updates is not None:
+        if set(updates) != set(PLATFORMS):
+            raise ValueError('Both updater platforms are required')
+        for platform, extension in [('darwin-universal', '.app.tar.gz'), ('win32-x64', '.exe')]:
+            item = updates[platform]
+            filename = f'Chef25_{version}_{platform}{extension}'
+            if item['url'] != f'/downloads/v{version}/{filename}':
+                raise ValueError('Unexpected updater path')
+            file = folder / filename
+            if item['size'] != file.stat().st_size or item['sha256'] != digest(file):
+                raise ValueError('Updater checksum or size mismatch')
+            signature = item.get('signature', '')
+            try:
+                lines = base64.b64decode(signature, validate=True).decode('utf8').splitlines()
+                if len(lines) != 4 or not lines[2].startswith('trusted comment: ') or len(base64.b64decode(lines[1], validate=True)) != 74 or len(base64.b64decode(lines[3], validate=True)) != 64:
+                    raise ValueError('Invalid updater signature')
+            except (ValueError, UnicodeError) as error:
+                raise ValueError('Invalid updater signature') from error
+            expected.add(filename)
+        if release['platforms']['darwin-universal'].get('signing') != 'notarized' or release['platforms']['win32-x64'].get('signing') != 'unsigned':
+            raise ValueError('Unexpected platform signing status')
+        updater = json.loads((folder / 'updater.json').read_text())
+        aliases = {'darwin-aarch64': 'darwin-universal', 'darwin-x86_64': 'darwin-universal', 'windows-x86_64': 'win32-x64'}
+        if updater.get('version') != version or set(updater.get('platforms', {})) != set(aliases):
+            raise ValueError('Updater manifest version or platforms differ')
+        for target, platform in aliases.items():
+            if updater['platforms'][target] != {'url': 'https://www.chef25.com' + updates[platform]['url'], 'signature': updates[platform]['signature']}:
+                raise ValueError('Updater manifest artifact differs')
+        expected.add('updater.json')
+    elif version != '0.1.0':
+        raise ValueError('New releases require signed updater artifacts')
     if {file.name for file in folder.iterdir()} != expected:
         raise ValueError('Unexpected or missing distribution files')
     sums = {}
@@ -98,6 +131,11 @@ def main():
                 os.rename(folder, destination)
                 # TemporaryDirectory cleanup tolerates a moved directory.
             pending = ROOT / '.latest.pending'
+            if release.get('updates'):
+                updater_pending = ROOT / '.updater.pending'
+                updater_pending.write_bytes((destination / 'updater.json').read_bytes())
+                os.chmod(updater_pending, 0o644)
+                os.replace(updater_pending, ROOT / 'updater.json')
             pending.write_text(json.dumps(release, indent=2) + '\n')
             os.chmod(pending, 0o644)
             os.replace(pending, latest)

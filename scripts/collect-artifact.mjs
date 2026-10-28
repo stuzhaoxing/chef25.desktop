@@ -34,4 +34,29 @@ await writeFile(
   path.join(destination, name + ".sha256"),
   `${await sha256(path.join(destination, name))}  ${name}\n`,
 );
+const updaterSource =
+  process.platform === "darwin"
+    ? path.join(
+        root,
+        "src-tauri/target/universal-apple-darwin/release/bundle/macos/25小厨.app.tar.gz",
+      )
+    : path.join(directory, files[0]);
+if (process.platform === "darwin") {
+  const signing = JSON.parse(
+    await readFile(
+      path.join(path.dirname(updaterSource), "signing-status.json"),
+      "utf8",
+    ),
+  );
+  if (signing.version !== pkg.version || signing.macos !== "notarized")
+    throw new Error("macOS notarization gate did not pass");
+  const updaterName = `Chef25_${pkg.version}_${id}.app.tar.gz`;
+  await copyFile(updaterSource, path.join(destination, updaterName));
+  await copyFile(
+    updaterSource + ".sig",
+    path.join(destination, updaterName + ".sig"),
+  );
+} else {
+  await copyFile(updaterSource + ".sig", path.join(destination, name + ".sig"));
+}
 console.log(`Collected ${name}`);

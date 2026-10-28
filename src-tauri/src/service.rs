@@ -4,7 +4,10 @@ use std::{
     net::{Ipv4Addr, SocketAddrV4, TcpListener},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Mutex, TryLockError},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex, TryLockError,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -26,6 +29,7 @@ pub struct Service {
     resources: PathBuf,
     data: PathBuf,
     child: Mutex<Option<Child>>,
+    updating: AtomicBool,
 }
 
 impl Service {
@@ -34,6 +38,7 @@ impl Service {
             resources,
             data,
             child: Mutex::new(None),
+            updating: AtomicBool::new(false),
         }
     }
 
@@ -68,6 +73,9 @@ impl Service {
 
     pub fn start(&self) -> Result<Status, String> {
         let mut guard = self.child.lock().map_err(|_| "酒馆状态异常")?;
+        if self.updating.load(Ordering::SeqCst) {
+            return Err("小厨正在安装更新，请等待应用重启".into());
+        }
         if let Some(child) = guard.as_mut() {
             if child
                 .try_wait()
@@ -168,6 +176,19 @@ impl Service {
         }
         Ok(self.snapshot("stopped"))
     }
+
+    pub fn begin_update(&self) -> Result<(), String> {
+        let mut guard = self.child.lock().map_err(|_| "酒馆状态异常")?;
+        self.updating.store(true, Ordering::SeqCst);
+        if let Some(mut child) = guard.take() {
+            terminate(&mut child);
+        }
+        Ok(())
+    }
+
+    pub fn end_update(&self) {
+        self.updating.store(false, Ordering::SeqCst);
+    }
 }
 
 impl Drop for Service {
@@ -255,6 +276,15 @@ fn copy_tree(source: &Path, destination: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn updating_blocks_service_start_before_touching_runtime_or_port() {
+        let service = Service::new(PathBuf::new(), PathBuf::new());
+        service.begin_update().unwrap();
+        assert!(service.start().unwrap_err().contains("正在安装更新"));
+        service.end_update();
+        assert!(!service.updating.load(Ordering::SeqCst));
+    }
 
     #[test]
     #[ignore = "requires the prepared runtime and exclusive port 25252"]
