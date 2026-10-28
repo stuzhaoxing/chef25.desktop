@@ -57,8 +57,17 @@ def notarize(payload, target):
         if attempt == 2:
             raise RuntimeError('Apple notarization did not finish; signed files remain available for retry')
         time.sleep(15)
-    run(['xcrun', 'stapler', 'staple', str(target)])
-    run(['xcrun', 'stapler', 'validate', str(target)])
+    print(f'Apple accepted notarization: {target.name}; fetching ticket', flush=True)
+    for attempt in range(6):
+        try:
+            run(['xcrun', 'stapler', 'staple', str(target)])
+            run(['xcrun', 'stapler', 'validate', str(target)])
+            break
+        except RuntimeError:
+            if attempt == 5:
+                raise RuntimeError('Apple accepted notarization but its ticket could not be validated after six attempts') from None
+            print(f'Notarization ticket temporarily unavailable; retry {attempt + 1}/5', flush=True)
+            time.sleep(min(15 * (attempt + 1), 60))
     print(f'Notarization accepted and ticket validated: {target.name}', flush=True)
 
 
@@ -114,8 +123,9 @@ def main():
             manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
             run(['codesign', '--force', '--timestamp', '--options', 'runtime', '--sign', IDENTITY, *keychain_args, str(APP)])
             verify_app(APP)
-            run(['ditto', '-c', '-k', '--keepParent', str(APP), str(temp / 'app.zip')])
-            notarize(temp / 'app.zip', APP)
+            recovery_archive = BUNDLE / 'macos/signed-app-recovery.zip'
+            run(['ditto', '-c', '-k', '--keepParent', str(APP), str(recovery_archive)])
+            notarize(recovery_archive, APP)
             run(['spctl', '--assess', '--type', 'execute', str(APP)])
             updater = BUNDLE / 'macos/25小厨.app.tar.gz'
             run(['tar', '--no-mac-metadata', '--no-xattrs', '-czf', str(updater), '-C', str(APP.parent), APP.name])
@@ -144,6 +154,7 @@ def main():
             run(['spctl', '--assess', '--type', 'open', '--context', 'context:primary-signature', str(dmg)])
             run(['hdiutil', 'verify', str(dmg)])
             (BUNDLE / 'macos/signing-status.json').write_text(json.dumps({'macos': 'notarized', 'updater': 'signed', 'version': version}) + '\n')
+            recovery_archive.unlink(missing_ok=True)
             print('Developer ID, app/DMG notarization, stapled updater, Gatekeeper and Universal checks passed', flush=True)
         finally:
             if original_keychains is not None:
