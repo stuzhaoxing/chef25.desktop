@@ -1,0 +1,21 @@
+name: Bug report / 问题反馈
+description: 报告可复现的问题，请勿包含密钥或聊天内容。
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 小厨版本、系统版本与架构
+      placeholder: 例如 0.1.0 / macOS / Apple Silicon
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤、预期与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 脱敏日志或截图
+      description: 先删除 API Key、用户名、路径中的个人信息和聊天内容。
