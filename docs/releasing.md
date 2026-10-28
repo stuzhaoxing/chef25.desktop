@@ -10,6 +10,7 @@
 2. 合并到 main，确认 Quality checks 通过。
 3. Actions → **Build and publish desktop preview** → Run workflow。首次检查可不选 publish，仅保存产物；选中 publish 后两个平台通过才自动同步服务器。
 4. 两个安装包：macOS Universal（Apple Silicon + Intel）和 Windows x64。macOS runner 交叉编译两个 Rust 架构并合并，内置 Node.js 也合并为 Universal；CI 验证两种 Node 架构均能执行。
+   Linux 准备任务先下载固定版本的上游归档并校验，通过 Actions artifact 传给两个构建任务。构建任务通过 `CHEF25_RUNTIME_ARCHIVES` 读取归档并再次校验，避开 macOS runner 到 Node CDN 的慢速链路；缓存缺失或哈希不符直接失败。
 5. 流水线执行格式、类型、单测、Clippy、真实酒馆启停与数据保留测试。Windows 另做安装、进程存活与卸载冒烟；macOS 校验最终 DMG 容器。
 6. 汇总两个安装包及其 SHA-256，并生成匹配当前 commit 的源码归档。所有产物整体通过受限 SSH 账号上传，接收端校验后原子更新下载清单。
 

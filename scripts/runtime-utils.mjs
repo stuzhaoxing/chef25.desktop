@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { copyFile, readFile } from "node:fs/promises";
+
+export async function copyVerifiedArchive(source, destination, expectedHash) {
+  await copyFile(source, destination);
+  if ((await sha256(destination)) !== expectedHash)
+    throw new Error("Cached archive checksum mismatch; refusing to extract");
+}
 
 export async function sha256(path) {
   return createHash("sha256")
