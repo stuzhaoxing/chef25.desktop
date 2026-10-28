@@ -2,16 +2,7 @@ name: Build and publish desktop preview
 on:
   workflow_dispatch:
     inputs:
-          - name: Preserve notarized update archive if later packaging fails
-        if: failure() && runner.os == 'macOS'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: macos-signed-updater-recovery
-          path: src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz*
-          if-no-files-found: ignore
-          retention-days: 14
-          compression-level: 0
-  publish:
+      publish:
         description: Sync all validated installers to the Chef25 download server
         type: boolean
         default: false
