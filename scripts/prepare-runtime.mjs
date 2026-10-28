@@ -11,7 +11,7 @@ import {
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { sha256 } from "./runtime-utils.mjs";
+import { copyVerifiedArchive, sha256 } from "./runtime-utils.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const lock = JSON.parse(
@@ -55,6 +55,18 @@ function run(command, args, cwd) {
 }
 
 async function download(url, destination, expectedHash) {
+  if (process.env.CHEF25_RUNTIME_ARCHIVES) {
+    await copyVerifiedArchive(
+      path.join(
+        process.env.CHEF25_RUNTIME_ARCHIVES,
+        path.basename(destination),
+      ),
+      destination,
+      expectedHash,
+    );
+    console.log(`Verified cached archive: ${path.basename(destination)}`);
+    return;
+  }
   console.log(
     `Downloading verified runtime archive: ${path.basename(destination)}`,
   );
@@ -114,14 +126,7 @@ try {
     `Preparing SillyTavern ${lock.version} (${lock.commit.slice(0, 12)}) for ${process.platform}/${process.arch}`,
   );
   const archive = path.join(staging, "sillytavern-source.tar.gz");
-  const response = await fetch(lock.archiveUrl, {
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!response.ok)
-    throw new Error(`Source download failed: HTTP ${response.status}`);
-  await writeFile(archive, Buffer.from(await response.arrayBuffer()));
-  if ((await sha256(archive)) !== lock.sha256)
-    throw new Error("Source archive checksum mismatch; refusing to extract");
+  await download(lock.archiveUrl, archive, lock.sha256);
   const tavern = path.join(staging, "sillytavern");
   await mkdir(tavern);
   run(tar, ["-xzf", archive, "--strip-components=1", "-C", tavern], root);

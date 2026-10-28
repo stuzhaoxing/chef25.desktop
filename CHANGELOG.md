@@ -13,6 +13,7 @@
 
 - Windows 构建使用系统自带的 tar.exe，避免 Git Bash 将盘符识别为远程归档地址。
 - macOS 构建使用系统 HTTPS 客户端下载 Node 归档，增加连接超时与有限重试，保留固定 SHA-256 校验。
+- 发布流水线由 Linux 任务准备上游归档，通过 Actions 分发并在构建前再次校验，避免 macOS runner 下载 Node 归档过慢。
 
 ### Known limitations
 
