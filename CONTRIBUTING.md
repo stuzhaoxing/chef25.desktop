@@ -6,6 +6,8 @@
 
 首次克隆后执行 `git config core.hooksPath .githooks`，启用提交到远端之前的敏感内容检查。Git 提交邮箱请使用 GitHub 的 `users.noreply.github.com` 隐私邮箱。检查失败只报告文件、行号和类别，不输出敏感值。
 
+创建 PR 前，也请在 GitHub Settings → Emails 开启 **Keep my email addresses private** 与 **Block command line pushes that expose my email**。本机 Git 邮箱配置不能控制 GitHub 自动生成的测试合并提交；仓库检查同时接受 GitHub 自身的 `noreply@github.com` 服务身份。
+
 1. 阅读 README 与架构说明，避免扩大当前版本范围。
 2. 用分支承载单一目的的变更，不混入依赖升级或生成产物。
 3. 运行 `npm run check`、Rust format / Clippy / tests；行为变化补充边界测试。

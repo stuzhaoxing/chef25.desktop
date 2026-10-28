@@ -43,8 +43,10 @@ for (const record of git("log", "--format=%H%x09%ae%x09%ce", ref)
   .split("\n")) {
   const [commit, author, committer] = record.split("\t");
   if (
-    ![author, committer].every((email) =>
-      email?.endsWith("@users.noreply.github.com"),
+    ![author, committer].every(
+      (email) =>
+        email?.endsWith("@users.noreply.github.com") ||
+        email === "noreply@github.com",
     )
   )
     findings.push(`${commit.slice(0, 12)}: use GitHub noreply commit identity`);
