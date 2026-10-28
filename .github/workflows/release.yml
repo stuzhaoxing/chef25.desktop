@@ -2,7 +2,16 @@ name: Build and publish desktop preview
 on:
   workflow_dispatch:
     inputs:
-      publish:
+          - name: Preserve notarized update archive if later packaging fails
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: macos-signed-updater-recovery
+          path: src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz*
+          if-no-files-found: ignore
+          retention-days: 14
+          compression-level: 0
+  publish:
         description: Sync all validated installers to the Chef25 download server
         type: boolean
         default: false
@@ -142,11 +151,21 @@ jobs:
           $uninstall = Start-Process (Join-Path $destination 'uninstall.exe') -ArgumentList '/S' -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed" }
       - run: node scripts/collect-artifact.mjs
+      - run: node scripts/check-collected-artifacts.mjs
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ matrix.id }}
           path: artifacts/${{ matrix.id }}/
           if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve notarized update archive if later packaging fails
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: macos-signed-updater-recovery
+          path: src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz*
+          if-no-files-found: ignore
           retention-days: 14
           compression-level: 0
   publish:

@@ -33,6 +33,10 @@ def run(arguments):
             'timestamp service': 'Apple timestamp service failed',
         }
         reason = next((message for needle, message in categories.items() if needle in detail), 'inspect private signing/notary diagnostics')
+        if Path(arguments[0]).name == 'hdiutil':
+            for value in [IDENTITY, TEAM, os.environ['APPLE_ID'], os.environ['APPLE_PASSWORD']]:
+                detail = detail.replace(value, '[redacted]')
+            reason = detail.strip()[-1000:]
         raise RuntimeError(f'{Path(arguments[0]).name} failed: {reason}')
     return result.stdout + result.stderr
 
@@ -130,7 +134,10 @@ def main():
             dmg_directory.mkdir(exist_ok=True)
             version = json.loads((ROOT / 'package.json').read_text())['version']
             dmg = dmg_directory / f'Chef25_{version}_darwin-universal.dmg'
-            run(['hdiutil', 'create', '-volname', '25小厨', '-srcfolder', str(image_root), '-ov', '-format', 'UDZO', str(dmg)])
+            # makehybrid avoids temporary filesystem mounts during image creation on CI.
+            raw_dmg = temp / 'hybrid.dmg'
+            run(['hdiutil', 'makehybrid', '-default-volume-name', '25小厨', '-hfs', '-o', str(raw_dmg), str(image_root)])
+            run(['hdiutil', 'convert', str(raw_dmg), '-format', 'UDZO', '-ov', '-o', str(dmg)])
             run(['codesign', '--force', '--timestamp', '--sign', IDENTITY, *keychain_args, str(dmg)])
             notarize(dmg, dmg)
             run(['codesign', '--verify', '--strict', str(dmg)])
