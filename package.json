@@ -1,6 +1,6 @@
 {
   "name": "chef25-desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -25,6 +25,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.10.0",
     "lucide-react": "^0.577.0",
+    "qrcode.react": "^4.2.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

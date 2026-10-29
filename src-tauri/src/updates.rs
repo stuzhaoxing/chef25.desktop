@@ -7,7 +7,7 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{ipc::Channel, AppHandle, Manager, State, WebviewWindow};
+use tauri::{ipc::Channel, AppHandle, Manager, State, Webview};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 #[derive(Default)]
@@ -47,7 +47,7 @@ pub struct Progress {
 
 #[tauri::command]
 pub async fn check_update(
-    window: WebviewWindow,
+    window: Webview,
     app: AppHandle,
     updates: State<'_, Updates>,
 ) -> Result<Option<AvailableUpdate>, String> {
@@ -75,7 +75,7 @@ pub async fn check_update(
 
 #[tauri::command]
 pub async fn install_update(
-    window: WebviewWindow,
+    window: Webview,
     app: AppHandle,
     updates: State<'_, Updates>,
     service: State<'_, Arc<Service>>,
@@ -121,7 +121,7 @@ pub async fn install_update(
         total: Some(downloaded),
     });
     let result = (|| {
-        if let Some(tavern) = app.get_webview_window("tavern") {
+        if let Some(tavern) = app.get_webview("tavern") {
             tavern.close().map_err(|_| "无法关闭酒馆窗口")?;
         }
         update

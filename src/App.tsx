@@ -1,31 +1,38 @@
+import BrandMark from "./components/BrandMark";
+import Button from "./components/Button";
+import { message } from "./message";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import UpdatePanel from "./UpdatePanel";
-import { version } from "../package.json";
+import MobileAccess from "./MobileAccess";
+import DataPanel from "./DataPanel";
+import GuidePanel from "./GuidePanel";
+import ChefMascot from "./ChefMascot";
+import TavernView from "./TavernView";
+import SettingsPanel from "./SettingsPanel";
+import ContactDialog from "./ContactDialog";
+import AboutDialog from "./AboutDialog";
 import {
-  BookOpen,
-  ChefHat,
   CircleHelp,
   Coffee,
-  ExternalLink,
   FolderHeart,
-  Heart,
   LoaderCircle,
   Play,
-  ShieldCheck,
-  Square,
-  Terminal,
+  Settings,
+  Power,
+  Info,
 } from "lucide-react";
 
 type Status = {
   phase: "stopped" | "starting" | "running";
   url: string;
+  lanUrls: string[];
   dataDir: string;
   bundled: boolean;
 };
 const initial: Status = {
   phase: "stopped",
   url: "http://127.0.0.1:25252",
+  lanUrls: [],
   dataDir: "",
   bundled: false,
 };
@@ -33,22 +40,41 @@ const initial: Status = {
 export default function App() {
   const [status, setStatus] = useState<Status>(initial);
   const [tab, setTab] = useState("tavern");
+  const [entered, setEntered] = useState(false);
   const [busy, setBusy] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [error, setError] = useState("");
+  const [contactOpen, setContactOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
   const inFlight = useRef(false);
   const native = isTauri();
+  const tavernVisible =
+    entered && status.phase === "running" && tab === "tavern";
+  const wasRunning = useRef(false);
+  const running = status.phase === "running";
+  useEffect(() => {
+    if (!native || wasRunning.current === running) return;
+    wasRunning.current = running;
+    void invoke("resize_workspace", { expanded: running }).catch(() => {
+      message.error("无法自动调整窗口大小，请手动拖动窗口边缘调整。");
+    });
+  }, [native, running]);
   const refresh = useCallback(async () => {
-    if (native && !inFlight.current)
+    if (native && !inFlight.current && !savingSettings)
       setStatus(await invoke<Status>("service_status"));
-  }, [native]);
+  }, [native, savingSettings]);
   useEffect(() => {
     let alive = true;
+    let reported = false;
     const poll = async () => {
       try {
         if (alive) await refresh();
+        reported = false;
       } catch {
-        if (alive) setError("暂时无法读取酒馆状态，请重新打开小厨。");
+        if (alive && !reported) {
+          reported = true;
+          message.error("暂时无法读取酒馆状态，请重新打开小厨。");
+        }
       }
     };
     void poll();
@@ -59,21 +85,18 @@ export default function App() {
     };
   }, [refresh]);
 
-  async function action(
-    command: "start_service" | "stop_service" | "open_tavern",
-  ) {
-    if (inFlight.current || updating) return;
+  async function action(command: "start_service" | "stop_service") {
+    if (inFlight.current || updating || savingSettings) return;
     inFlight.current = true;
     setBusy(true);
-    setError("");
     try {
       if (command === "start_service")
         setStatus((s) => ({ ...s, phase: "starting" }));
       const result = await invoke<Status | null>(command);
       if (result) setStatus(result);
-      if (command === "start_service") await invoke("open_tavern");
+      setEntered(command === "start_service");
     } catch (reason) {
-      setError(String(reason));
+      message.error(String(reason));
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -85,9 +108,9 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="logo">
-          <ChefHat size={29} />
-          <span>
-            25小厨<small>CHEF25 DESKTOP</small>
+          <BrandMark />
+          <span className="logo-copy">
+            25小厨<span className="logo-en">CHEF25</span>
           </span>
         </div>
         <span className="nav-label">我的小厨房</span>
@@ -95,191 +118,160 @@ export default function App() {
           {[
             { id: "tavern", label: "我的酒馆", icon: Coffee },
             { id: "data", label: "本地数据", icon: FolderHeart },
-            { id: "help", label: "使用指南", icon: CircleHelp },
+            { id: "help", label: "酒馆入门", icon: CircleHelp },
+            { id: "settings", label: "设置", icon: Settings },
           ].map(({ id, label, icon: Icon }) => (
-            <button
+            <Button
               key={id}
               className={tab === id ? "selected" : ""}
-              onClick={() => setTab(id)}
+              disabled={savingSettings}
+              onClick={() => {
+                setTab(id);
+                if (id === "tavern" && running) setEntered(true);
+              }}
+              icon={Icon}
+              iconSize={18}
             >
-              <Icon size={18} />
               {label}
-            </button>
+            </Button>
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <Heart size={17} />
-          <p>
-            为热爱故事的人，
-            <br />
-            做一点小事。
-          </p>
-          <span>v{version} · 开发预览</span>
+          <div className="service-control">
+            <div className="sidebar-status" role="status">
+              <span className={`dot ${status.phase}`} />
+              {status.phase === "running"
+                ? "酒馆运行中"
+                : status.phase === "starting"
+                  ? "酒馆准备中…"
+                  : "酒馆尚未启动"}
+            </div>
+            {running && (
+              <Button
+                className="service-stop"
+                disabled={busy || updating || savingSettings}
+                onClick={() => void action("stop_service")}
+                icon={busy ? LoaderCircle : Power}
+                iconSize={13}
+                iconClassName={busy ? "spin" : undefined}
+                aria-label={busy ? "正在停止酒馆服务" : "停止酒馆服务"}
+                aria-busy={busy}
+                title="停止酒馆服务，电脑和手机将暂时无法访问"
+              >
+                {busy ? "停止中…" : "停止"}
+              </Button>
+            )}
+          </div>
+          {running && <MobileAccess urls={status.lanUrls ?? []} />}
+          <Button
+            className="about-trigger"
+            aria-haspopup="dialog"
+            onClick={() => setAboutOpen(true)}
+            icon={Info}
+            iconSize={18}
+          >
+            关于
+          </Button>
         </div>
       </aside>
-      <main className="main">
-        <header>
-          <h1>
-            {tab === "tavern"
-              ? "我的酒馆"
-              : tab === "data"
-                ? "本地数据"
-                : "使用指南"}
-          </h1>
-          <span className="local-badge">
-            <span /> LOCAL FIRST
-          </span>
+      <main className={tavernVisible ? "main tavern-active" : "main"}>
+        <header className="page-header">
+          <div className="page-heading">
+            <h1>
+              {tab === "tavern"
+                ? "我的酒馆"
+                : tab === "data"
+                  ? "本地数据"
+                  : tab === "settings"
+                    ? "设置"
+                    : "酒馆入门"}
+            </h1>
+          </div>
+          {tab === "tavern" && (
+            <div className="tavern-brand" aria-label="基于 SillyTavern">
+              <span className="tavern-brand-copy">
+                <span className="tavern-brand-caption">基于</span>
+                <span className="tavern-brand-name">
+                  SillyTavern
+                  <svg
+                    viewBox="0 0 120 10"
+                    preserveAspectRatio="none"
+                    aria-hidden="true"
+                    focusable="false"
+                  >
+                    <path d="M2 5Q56 -1 118 4M12 9Q62 3 108 8" />
+                  </svg>
+                </span>
+              </span>
+            </div>
+          )}
         </header>
         {!native && (
           <div className="notice">
             浏览器界面预览 · 启停功能需要在 Tauri 桌面窗口中使用。
           </div>
         )}
-        {tab === "tavern" ? (
-          <>
-            <section className="welcome">
-              <div className="chef-scene">
-                <span className="star s1">✦</span>
-                <ChefHat size={99} strokeWidth={1.2} />
-                <span className="star s2">✧</span>
-                <div className="smile">• ᴗ •</div>
-              </div>
-              <span className="eyebrow">YOUR STORY STARTS HERE</span>
-              <h2>今天，想遇见谁？</h2>
-              <p>
-                小厨备好开场，你负责尽兴。
-                <br />
-                打开熟悉的酒馆，继续没讲完的故事。
-              </p>
-              <button
-                className="primary"
-                disabled={!native || busy || updating}
-                onClick={() =>
-                  void action(
-                    status.phase === "running"
-                      ? "open_tavern"
-                      : "start_service",
-                  )
-                }
-              >
-                {busy ? (
-                  <LoaderCircle size={17} className="spin" />
-                ) : (
-                  <Play size={16} fill="currentColor" />
-                )}
-                {busy
-                  ? "小厨正在准备…"
-                  : status.phase === "running"
-                    ? "进入酒馆"
-                    : "一键启动酒馆"}
-              </button>
-              <span className="service-label">
-                <span className={`dot ${status.phase}`} />
-                {status.phase === "running"
-                  ? "酒馆已就绪，随时可以入座"
-                  : status.phase === "starting"
-                    ? "首次启动需要准备本地文件，请稍候"
-                    : "酒馆尚未启动"}
-              </span>
-              {status.phase === "running" && (
-                <button
-                  className="stop"
-                  disabled={busy || updating}
-                  onClick={() => void action("stop_service")}
-                >
-                  <Square size={11} /> 停止服务
-                </button>
-              )}
-            </section>
-            <div className="info-grid">
-              <article>
-                <ShieldCheck size={21} />
-                <div>
-                  <h3>故事留在本机</h3>
-                  <p>角色与聊天记录保存在你的电脑里。</p>
-                </div>
-              </article>
-              <article>
-                <BookOpen size={21} />
-                <div>
-                  <h3>第一次来？</h3>
-                  <button onClick={() => setTab("help")}>
-                    看看开场指南 <ExternalLink size={12} />
-                  </button>
-                </div>
-              </article>
+        <TavernView
+          key={status.url}
+          visible={tavernVisible && !aboutOpen && !contactOpen}
+          onError={message.error}
+        />
+        {tab === "tavern" &&
+        entered &&
+        status.phase === "running" ? null : tab === "tavern" ? (
+          <section className="welcome">
+            <ChefMascot />
+            <div className="welcome-copy">
+              <h2>故事，你来写。</h2>
+              <p>开场，交给小厨。</p>
             </div>
-          </>
-        ) : tab === "data" ? (
-          <section className="detail">
-            <FolderHeart size={36} />
-            <h2>你的故事，有自己的位置。</h2>
-            <p>
-              角色、聊天和配置与应用安装目录分开保存，升级应用不会覆盖它们。卸载前请自行备份这个目录。
-            </p>
-            <label>本地数据目录</label>
-            <code>{status.dataDir || "请在桌面应用中查看"}</code>
-            <p>
-              日志位于此目录的 <code>logs/sillytavern.log</code>
-              ，可能包含个人内容；提交 Issue 前请检查并脱敏。
-            </p>
-            <p>
-              本地酒馆地址：<code>{status.url}</code>
-            </p>
-          </section>
-        ) : (
-          <section className="detail">
-            <Coffee size={36} />
-            <h2>三步，准备好你的酒馆。</h2>
-            <ol>
-              <li>
-                <strong>启动本地服务</strong>
-                <p>
-                  回到「我的酒馆」点击一键启动。准备完成后会自动打开酒馆窗口。
-                </p>
-              </li>
-              <li>
-                <strong>配置模型连接</strong>
-                <p>
-                  在 SillyTavern 的 API
-                  连接中选择自己的模型服务，并填写服务地址与 API
-                  Key。小厨当前不提供模型额度。
-                </p>
-              </li>
-              <li>
-                <strong>选择角色，开始故事</strong>
-                <p>
-                  使用你已有的角色卡，或在 SillyTavern
-                  中创建角色。退出小厨时，本次启动的服务会一并停止。
-                </p>
-              </li>
-            </ol>
-            <a
-              href="https://docs.sillytavern.app/"
-              target="_blank"
-              rel="noreferrer"
+            <Button
+              className="primary"
+              disabled={!native || busy || updating || savingSettings}
+              onClick={() =>
+                status.phase === "running"
+                  ? setEntered(true)
+                  : void action("start_service")
+              }
             >
-              SillyTavern 官方文档 ↗
-            </a>
-            <p className="subtle">
-              如果端口 25252
-              已被其他程序占用，小厨会提示冲突。请先处理冲突，不会自动接管其他服务。
-            </p>
+              {busy ? (
+                <LoaderCircle size={17} className="spin" />
+              ) : (
+                <Play size={16} fill="currentColor" />
+              )}
+              {busy
+                ? "小厨正在准备…"
+                : status.phase === "running"
+                  ? "进入酒馆"
+                  : "一键启动酒馆"}
+            </Button>
           </section>
+        ) : tab === "settings" ? (
+          <SettingsPanel
+            disabled={busy || updating || status.phase === "starting"}
+            running={running}
+            url={status.url}
+            onBusyChange={setSavingSettings}
+          />
+        ) : tab === "data" ? (
+          <DataPanel
+            dataDir={status.dataDir}
+            disabled={busy || updating || status.phase === "starting"}
+            running={running}
+            onBusyChange={setSavingSettings}
+          />
+        ) : (
+          <GuidePanel />
         )}
-        <UpdatePanel disabled={busy} onBusyChange={setUpdating} />
-        {error && (
-          <div className="error" role="alert">
-            {error}
-          </div>
-        )}
-        <footer>
-          <span>
-            <Terminal size={12} /> SillyTavern 1.19.0
-          </span>
-          <span>少一点折腾，多一点故事。</span>
-        </footer>
       </main>
+      <ContactDialog open={contactOpen} onClose={() => setContactOpen(false)} />
+      <AboutDialog
+        onContact={() => setContactOpen(true)}
+        open={aboutOpen}
+        onClose={() => setAboutOpen(false)}
+        disabled={busy || savingSettings}
+        onBusyChange={setUpdating}
+      />
     </div>
   );
 }
