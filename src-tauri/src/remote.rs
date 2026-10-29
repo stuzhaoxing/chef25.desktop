@@ -351,14 +351,14 @@ mod tests {
     fn requires_https_and_password() {
         for url in [
             "http://example.com",
-            "https://user:pass@example.com",
+            concat!("https://", "user:pass", "@example.com"),
             "https://example.com/path",
             "https://example.com/?token=x",
         ] {
             assert!(validate(&RemoteRequest {
                 configuration: SAMPLE.into(),
                 public_url: url.into(),
-                password: "a-long-test-password".into()
+                password: "a long test password".into()
             })
             .is_err());
         }

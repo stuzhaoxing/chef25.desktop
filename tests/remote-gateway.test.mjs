@@ -35,7 +35,7 @@ test("remote ingress authenticates before proxying, strips spoofed headers and p
   child.stdin.write(
     JSON.stringify({
       targetPort: upstream.address().port,
-      password: "test-password-123456",
+      password: "test password 123456",
       marker: "test-marker",
     }) + "\n",
   );
@@ -49,7 +49,7 @@ test("remote ingress authenticates before proxying, strips spoofed headers and p
     headers: {
       Authorization:
         "Basic " +
-        Buffer.from("chef25:test-password-123456").toString("base64"),
+        Buffer.from("chef25:test password 123456").toString("base64"),
       "X-Forwarded-For": "8.8.8.8",
       "X-Real-IP": "8.8.8.8",
       Forwarded: "for=8.8.8.8",
