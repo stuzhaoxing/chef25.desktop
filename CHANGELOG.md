@@ -1,5 +1,7 @@
 # Changelog
 
+- Identify public release verification requests as Chef25 so the download gateway accepts full and Range checks without relaxing Cloudflare security settings.
+
 ## Unreleased
 
 - 下载服务改为 Pages Functions，仅需在现有 DNS 添加下载子域名 CNAME；保留流式下载、Range 和私有桶限制，关闭预览环境下载。
