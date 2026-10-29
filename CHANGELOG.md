@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-10-29
 
 - 侧栏停止服务改为运行状态旁的轻量电源按钮，常态使用红色图标与文字、浅红底和细描边，执行期间显示「停止中…」。
 
@@ -66,6 +66,10 @@
 
 - 简化侧边栏「设置」为手动设置启动端口，默认 25252；移除自动/指定模式，端口占用时提示更换。兼容旧设置中的端口值，酒馆页面及健康检查使用实际启动端口，不接管其他进程。
 
+- Identify public release verification requests as Chef25 so the download gateway accepts full and Range checks without relaxing Cloudflare security settings.
+
+## Unreleased
+
 - 下载服务改为 Pages Functions，仅需在现有 DNS 添加下载子域名 CNAME；保留流式下载、Range 和私有桶限制，关闭预览环境下载。
 
 ### Changed
@@ -107,6 +111,10 @@
 ### Fixed
 
 - CI 临时钥匙串加入并恢复用户搜索列表，签名凭据包含 Apple 中间证书；签名错误仅公开脱敏类别。
+
+- CI 通过 HFS hybrid 转压缩 DMG 创建安装镜像，避免创建过程依赖临时挂载。
+
+- Apple 接受公证后，对尚未可用的装订票据进行有限重试；失败保留已签名归档，仍阻止发布。
 
 ### Migration
 

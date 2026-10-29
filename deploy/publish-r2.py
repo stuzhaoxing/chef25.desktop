@@ -20,6 +20,10 @@ IMMUTABLE = 'public, max-age=31536000, immutable'
 LOCK = 'downloads/.publish-lock'
 MAX_BUCKET_BYTES = 9_000_000_000  # Decimal GB; leave headroom below the account's 10 GB free tier.
 MAX_BUCKET_OBJECTS = 10_000
+PUBLIC_HEADERS = {
+    'Accept-Encoding': 'identity',
+    'User-Agent': 'Chef25-Release-Verifier/1.0 (+https://www.chef25.com)',
+}
 
 
 def check_capacity(client, bucket, planned):
@@ -123,7 +127,7 @@ def put_immutable(client, bucket, key, file):
 
 def verify_public(download_origin, key, file):
     url = download_origin + '/' + key
-    with urlopen(Request(url, headers={'Accept-Encoding': 'identity'}), timeout=120) as response:
+    with urlopen(Request(url, headers=PUBLIC_HEADERS), timeout=120) as response:
         if response.status != 200 or response.geturl() != url:
             raise ValueError('Custom domain must return the object directly over HTTPS')
         if response.headers.get('Content-Length') != str(file.stat().st_size):
@@ -136,7 +140,7 @@ def verify_public(download_origin, key, file):
         if digest.hexdigest() != receiver.digest(file):
             raise ValueError('Public download checksum mismatch')
     if file.stat().st_size and content_type(file.name) == 'application/octet-stream':
-        with urlopen(Request(url, headers={'Range': 'bytes=0-0', 'Accept-Encoding': 'identity'}), timeout=60) as response:
+        with urlopen(Request(url, headers={**PUBLIC_HEADERS, 'Range': 'bytes=0-0'}), timeout=60) as response:
             with file.open('rb') as local:
                 expected = local.read(1)
             if response.geturl() != url or response.status != 206 or response.headers.get('Content-Range') != f'bytes 0-0/{file.stat().st_size}' or response.read(2) != expected:

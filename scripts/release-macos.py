@@ -33,6 +33,10 @@ def run(arguments):
             'timestamp service': 'Apple timestamp service failed',
         }
         reason = next((message for needle, message in categories.items() if needle in detail), 'inspect private signing/notary diagnostics')
+        if Path(arguments[0]).name == 'hdiutil':
+            for value in [IDENTITY, TEAM, os.environ['APPLE_ID'], os.environ['APPLE_PASSWORD']]:
+                detail = detail.replace(value, '[redacted]')
+            reason = detail.strip()[-1000:]
         raise RuntimeError(f'{Path(arguments[0]).name} failed: {reason}')
     return result.stdout + result.stderr
 
@@ -53,8 +57,17 @@ def notarize(payload, target):
         if attempt == 2:
             raise RuntimeError('Apple notarization did not finish; signed files remain available for retry')
         time.sleep(15)
-    run(['xcrun', 'stapler', 'staple', str(target)])
-    run(['xcrun', 'stapler', 'validate', str(target)])
+    print(f'Apple accepted notarization: {target.name}; fetching ticket', flush=True)
+    for attempt in range(6):
+        try:
+            run(['xcrun', 'stapler', 'staple', str(target)])
+            run(['xcrun', 'stapler', 'validate', str(target)])
+            break
+        except RuntimeError:
+            if attempt == 5:
+                raise RuntimeError('Apple accepted notarization but its ticket could not be validated after six attempts') from None
+            print(f'Notarization ticket temporarily unavailable; retry {attempt + 1}/5', flush=True)
+            time.sleep(min(15 * (attempt + 1), 60))
     print(f'Notarization accepted and ticket validated: {target.name}', flush=True)
 
 
@@ -110,8 +123,9 @@ def main():
             manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
             run(['codesign', '--force', '--timestamp', '--options', 'runtime', '--sign', IDENTITY, *keychain_args, str(APP)])
             verify_app(APP)
-            run(['ditto', '-c', '-k', '--keepParent', str(APP), str(temp / 'app.zip')])
-            notarize(temp / 'app.zip', APP)
+            recovery_archive = BUNDLE / 'macos/signed-app-recovery.zip'
+            run(['ditto', '-c', '-k', '--keepParent', str(APP), str(recovery_archive)])
+            notarize(recovery_archive, APP)
             run(['spctl', '--assess', '--type', 'execute', str(APP)])
             updater = BUNDLE / 'macos/25小厨.app.tar.gz'
             run(['tar', '--no-mac-metadata', '--no-xattrs', '-czf', str(updater), '-C', str(APP.parent), APP.name])
@@ -130,13 +144,17 @@ def main():
             dmg_directory.mkdir(exist_ok=True)
             version = json.loads((ROOT / 'package.json').read_text())['version']
             dmg = dmg_directory / f'Chef25_{version}_darwin-universal.dmg'
-            run(['hdiutil', 'create', '-volname', '25小厨', '-srcfolder', str(image_root), '-ov', '-format', 'UDZO', str(dmg)])
+            # makehybrid avoids temporary filesystem mounts during image creation on CI.
+            raw_dmg = temp / 'hybrid.dmg'
+            run(['hdiutil', 'makehybrid', '-default-volume-name', '25小厨', '-hfs', '-o', str(raw_dmg), str(image_root)])
+            run(['hdiutil', 'convert', str(raw_dmg), '-format', 'UDZO', '-ov', '-o', str(dmg)])
             run(['codesign', '--force', '--timestamp', '--sign', IDENTITY, *keychain_args, str(dmg)])
             notarize(dmg, dmg)
             run(['codesign', '--verify', '--strict', str(dmg)])
             run(['spctl', '--assess', '--type', 'open', '--context', 'context:primary-signature', str(dmg)])
             run(['hdiutil', 'verify', str(dmg)])
             (BUNDLE / 'macos/signing-status.json').write_text(json.dumps({'macos': 'notarized', 'updater': 'signed', 'version': version}) + '\n')
+            recovery_archive.unlink(missing_ok=True)
             print('Developer ID, app/DMG notarization, stapled updater, Gatekeeper and Universal checks passed', flush=True)
         finally:
             if original_keychains is not None:
