@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Sync all validated installers to the Chef25 download server
+        description: Publish all validated installers and update manifests to Cloudflare R2
         type: boolean
         default: false
 permissions:
@@ -165,8 +165,10 @@ jobs:
     needs: build
     if: inputs.publish && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     environment: downloads-preview
+    env:
+      CHEF25_DOWNLOAD_ORIGIN: ${{ vars.CHEF25_DOWNLOAD_ORIGIN }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -184,22 +186,24 @@ jobs:
           name: win32-x64
           path: artifacts/win32-x64
       - run: node scripts/create-distribution.mjs
-      - name: Publish verified distribution using a restricted SSH key
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: distribution
+          path: artifacts/distribution/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Install pinned R2 publishing dependencies
+        run: python3 -m pip install -r deploy/requirements-r2.txt
+      - name: Validate publishing regression tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+      - name: Publish and verify immutable R2 objects, then activate manifests
         env:
-          DEPLOY_KEY: ${{ secrets.CHEF25_DOWNLOADS_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.CHEF25_DOWNLOADS_KNOWN_HOSTS }}
-          DEPLOY_HOST: ${{ vars.CHEF25_DOWNLOADS_HOST }}
-          DEPLOY_USER: ${{ vars.CHEF25_DOWNLOADS_USER }}
-        run: |
-          set -euo pipefail
-          test -n "$DEPLOY_KEY" && test -n "$KNOWN_HOSTS"
-          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]] && [[ "$DEPLOY_USER" =~ ^[a-zA-Z0-9_-]+$ ]]
-          temporary=$(mktemp -d)
-          trap 'rm -rf "$temporary"' EXIT
-          printf '%s\n' "$DEPLOY_KEY" > "$temporary/key"
-          printf '%s\n' "$KNOWN_HOSTS" > "$temporary/known_hosts"
-          chmod 600 "$temporary/key"
-          tar -czf - -C artifacts/distribution . | ssh -i "$temporary/key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$temporary/known_hosts" "$DEPLOY_USER@$DEPLOY_HOST" publish
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CHEF25_R2_BUCKET: ${{ vars.CHEF25_R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: python3 deploy/publish-r2.py artifacts/distribution --activate
       - name: Verify public manifest and download headers
         run: |
           curl --fail --retry 3 https://www.chef25.com/downloads/latest.json -o latest.json

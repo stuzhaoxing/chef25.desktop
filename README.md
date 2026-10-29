@@ -67,6 +67,7 @@ macOS 发布使用一个 Universal 安装包，Rust 主程序与内置 Node.js �
 
 - [贡献指南](CONTRIBUTING.md) · [安全反馈](SECURITY.md) · [行为准则](CODE_OF_CONDUCT.md)
 - [架构说明](docs/architecture.md) · [发布流程](docs/releasing.md) · [变更记录](CHANGELOG.md)
+- [R2 下载分发与自动发布接入](docs/r2-distribution.md)
 - 官网：[www.chef25.com](https://www.chef25.com)
 
 25小厨是独立项目，与 SillyTavern 官方无隶属关系。感谢 [SillyTavern](https://github.com/SillyTavern/SillyTavern)、[Tauri](https://tauri.app/) 和所有贡献者。

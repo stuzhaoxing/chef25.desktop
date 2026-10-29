@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Forced SSH command for Chef25 downloads; no shell, sudo, or service management."""
-import fcntl
 import base64
 import hashlib
 import json
@@ -24,7 +23,7 @@ def digest(file):
     return result.hexdigest()
 
 
-def validate(folder):
+def validate(folder, updater_origin='https://www.chef25.com'):
     release = json.loads((folder / 'distribution.json').read_text())
     version = release.get('version', '')
     if not re.fullmatch(r'\d+\.\d+\.\d+', version) or release.get('preview') is not True:
@@ -70,7 +69,7 @@ def validate(folder):
         if updater.get('version') != version or set(updater.get('platforms', {})) != set(aliases):
             raise ValueError('Updater manifest version or platforms differ')
         for target, platform in aliases.items():
-            if updater['platforms'][target] != {'url': 'https://www.chef25.com' + updates[platform]['url'], 'signature': updates[platform]['signature']}:
+            if updater['platforms'][target] != {'url': updater_origin + updates[platform]['url'], 'signature': updates[platform]['signature']}:
                 raise ValueError('Updater manifest artifact differs')
         expected.add('updater.json')
     elif version != '0.1.0':
@@ -92,6 +91,8 @@ def validate(folder):
 
 
 def main():
+    import fcntl  # Linux SSH receiver only; shared validation also runs on Windows.
+
     if os.environ.get('SSH_ORIGINAL_COMMAND') != 'publish':
         raise ValueError('This key can only run publish')
     staging_root = ROOT / '.incoming'

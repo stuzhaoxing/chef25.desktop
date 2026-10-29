@@ -1,0 +1,28 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "chef25-downloads",
+  "pages_build_output_dir": "../artifacts/download-pages",
+  "compatibility_date": "2026-10-28",
+  "send_metrics": false,
+  "r2_buckets": [
+    {
+      "binding": "DOWNLOADS",
+      "bucket_name": "chef25-downloads",
+    },
+  ],
+  "vars": {
+    "DOWNLOAD_HOST": "download.chef25.com",
+    "PAGES_HOST": "chef25-downloads.pages.dev",
+    "DOWNLOADS_ENABLED": "true",
+  },
+  "env": {
+    "preview": {
+      "r2_buckets": [],
+      "vars": {
+        "DOWNLOAD_HOST": "download.chef25.com",
+        "PAGES_HOST": "chef25-downloads.pages.dev",
+        "DOWNLOADS_ENABLED": "false",
+      },
+    },
+  },
+}
