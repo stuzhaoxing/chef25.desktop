@@ -38,6 +38,23 @@ const initial: Status = {
 };
 
 export default function App() {
+  const [showGuide, setShowGuide] = useState(() => {
+    try {
+      return localStorage.getItem("chef25.showGuide") !== "false";
+    } catch {
+      return true;
+    }
+  });
+  function changeShowGuide(value: boolean) {
+    try {
+      localStorage.setItem("chef25.showGuide", String(value));
+    } catch {
+      message.error("无法保存显示设置，请重试。");
+      return;
+    }
+    setShowGuide(value);
+    if (!value && tab === "help") setTab("settings");
+  }
   const [status, setStatus] = useState<Status>(initial);
   const [tab, setTab] = useState("tavern");
   const [entered, setEntered] = useState(false);
@@ -120,21 +137,23 @@ export default function App() {
             { id: "data", label: "本地数据", icon: FolderHeart },
             { id: "help", label: "酒馆入门", icon: CircleHelp },
             { id: "settings", label: "设置", icon: Settings },
-          ].map(({ id, label, icon: Icon }) => (
-            <Button
-              key={id}
-              className={tab === id ? "selected" : ""}
-              disabled={savingSettings}
-              onClick={() => {
-                setTab(id);
-                if (id === "tavern" && running) setEntered(true);
-              }}
-              icon={Icon}
-              iconSize={18}
-            >
-              {label}
-            </Button>
-          ))}
+          ]
+            .filter(({ id }) => id !== "help" || showGuide)
+            .map(({ id, label, icon: Icon }) => (
+              <Button
+                key={id}
+                className={tab === id ? "selected" : ""}
+                disabled={savingSettings}
+                onClick={() => {
+                  setTab(id);
+                  if (id === "tavern" && running) setEntered(true);
+                }}
+                icon={Icon}
+                iconSize={18}
+              >
+                {label}
+              </Button>
+            ))}
         </nav>
         <div className="sidebar-bottom">
           <div className="service-control">
@@ -248,6 +267,8 @@ export default function App() {
           </section>
         ) : tab === "settings" ? (
           <SettingsPanel
+            showGuide={showGuide}
+            onShowGuideChange={changeShowGuide}
             disabled={busy || updating || status.phase === "starting"}
             running={running}
             url={status.url}

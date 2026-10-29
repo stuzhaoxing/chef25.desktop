@@ -16,11 +16,15 @@ export default function SettingsPanel({
   running,
   url,
   onBusyChange,
+  showGuide,
+  onShowGuideChange,
 }: {
   disabled: boolean;
   running: boolean;
   url: string;
   onBusyChange: (busy: boolean) => void;
+  showGuide: boolean;
+  onShowGuideChange: (value: boolean) => void;
 }) {
   const [port, setPort] = useState("25252");
   const [loading, setLoading] = useState(isTauri());
@@ -114,6 +118,30 @@ export default function SettingsPanel({
 
   return (
     <section className="detail settings-panel">
+      <section className="settings-card" aria-labelledby="display-heading">
+        <SectionHeading id="display-heading" icon={SlidersHorizontal}>
+          界面显示
+        </SectionHeading>
+        <div className="settings-row">
+          <div className="settings-copy">
+            <p id="guide-toggle-label">显示入门教程</p>
+            <p id="guide-toggle-help">
+              在侧栏显示「酒馆入门」，关闭后可随时在这里恢复。
+            </p>
+          </div>
+          <Button
+            type="button"
+            role="switch"
+            aria-checked={showGuide}
+            aria-labelledby="guide-toggle-label"
+            aria-describedby="guide-toggle-help"
+            className={showGuide ? "primary" : ""}
+            onClick={() => onShowGuideChange(!showGuide)}
+          >
+            {showGuide ? "已开启" : "已关闭"}
+          </Button>
+        </div>
+      </section>
       <section className="settings-card" aria-labelledby="launch-heading">
         <SectionHeading id="launch-heading" icon={SlidersHorizontal}>
           启动设置
