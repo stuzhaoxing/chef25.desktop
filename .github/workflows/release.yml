@@ -87,7 +87,8 @@ jobs:
       - run: npm run runtime:check
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      # Port-ownership tests release and rebind ephemeral ports; serialize them.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked -- --test-threads=1
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked bundled_runtime_lifecycle -- --ignored --nocapture
       - name: Verify both Node runtime architectures
         if: runner.os == 'macOS'
@@ -148,11 +149,23 @@ jobs:
           $uninstall = Start-Process (Join-Path $destination 'uninstall.exe') -ArgumentList '/S' -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed" }
       - run: node scripts/collect-artifact.mjs
+      - run: node scripts/check-collected-artifacts.mjs
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ matrix.id }}
           path: artifacts/${{ matrix.id }}/
           if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve signed app archives if later notarization or packaging fails
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: macos-signed-updater-recovery
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz*
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/signed-app-recovery.zip
+          if-no-files-found: ignore
           retention-days: 14
           compression-level: 0
   publish:

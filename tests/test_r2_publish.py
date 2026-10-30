@@ -236,6 +236,16 @@ class PublicDownloadTests(unittest.TestCase):
     def test_valid_full_download_and_range(self):
         self.verify([Response(b'installer', self.url), Response(b'i', self.url, 206, {'Content-Range': 'bytes 0-0/9'})])
 
+    def test_public_verification_identifies_client_for_full_and_range_requests(self):
+        responses = [Response(b'installer', self.url), Response(b'i', self.url, 206, {'Content-Range': 'bytes 0-0/9'})]
+        with patch.object(publisher, 'urlopen', side_effect=responses) as opening:
+            publisher.verify_public('https://download.chef25.com', 'downloads/v0.2.0/app.exe', self.file)
+        for call in opening.call_args_list:
+            headers = dict(call.args[0].header_items())
+            self.assertEqual(headers['User-agent'], 'Chef25-Release-Verifier/1.0 (+https://www.chef25.com)')
+            self.assertEqual(headers['Accept-encoding'], 'identity')
+        self.assertEqual(opening.call_args_list[1].args[0].get_header('Range'), 'bytes=0-0')
+
     def test_corrupt_same_length_response(self):
         with self.assertRaisesRegex(ValueError, 'checksum'):
             self.verify([Response(b'corrupted', self.url)])
