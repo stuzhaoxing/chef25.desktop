@@ -1,6 +1,6 @@
 [package]
 name = "chef25-desktop"
-version = "0.3.2"
+version = "0.3.4"
 description = "A small kitchen for your SillyTavern"
 authors = ["Chef25 contributors"]
 edition = "2021"
