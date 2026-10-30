@@ -87,7 +87,8 @@ jobs:
       - run: npm run runtime:check
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      # Port-ownership tests release and rebind ephemeral ports; serialize them.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked -- --test-threads=1
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked bundled_runtime_lifecycle -- --ignored --nocapture
       - name: Verify both Node runtime architectures
         if: runner.os == 'macOS'
