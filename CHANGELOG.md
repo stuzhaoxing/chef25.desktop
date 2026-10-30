@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3
+
+- 关闭主窗口改为收起到系统托盘，酒馆继续运行；macOS 隐藏 Dock 图标，不再生成最小化窗口。新增托盘恢复窗口与退出菜单。
+- 停止酒馆后自动退出最大化或全屏，恢复默认的 860 × 640 窗口尺寸并居中（受当前屏幕工作区限制）。
+- Desktop 发布在 R2 与公开清单验证成功后，自动创建对应版本的 GitHub Pre-release，附上原始发行文件、校验值及版本变更说明。
+
 ## 0.3.2
 
 - Share searchable Chinese usage documentation with the website in an isolated view.

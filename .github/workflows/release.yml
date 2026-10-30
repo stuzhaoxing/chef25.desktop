@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish all validated installers and update manifests to Cloudflare R2
+        description: Publish validated installers to R2 and create a GitHub pre-release
         type: boolean
         default: false
 permissions:
@@ -221,3 +221,62 @@ jobs:
           node --input-type=module -e 'import fs from "node:fs"; const manifest=JSON.parse(fs.readFileSync("latest.json")); for(const item of Object.values(manifest.platforms)){const res=await fetch("https://www.chef25.com"+item.url,{method:"HEAD"}); if(!res.ok || Number(res.headers.get("content-length"))!==item.size) throw new Error("Download header mismatch");}'
           curl --fail --retry 3 https://www.chef25.com/downloads/updater.json -o updater.json
           cmp updater.json artifacts/distribution/updater.json
+  github-release:
+    needs: publish
+    if: inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: distribution
+          path: artifacts/distribution
+      - name: Verify distribution and prepare version release notes
+        env:
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          (cd artifacts/distribution && sha256sum --check SHA256SUMS)
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          manifest = json.loads(Path("artifacts/distribution/distribution.json").read_text())
+          version = manifest["version"]
+          assert re.fullmatch(r"\d+\.\d+\.\d+", version), "Invalid release version"
+          assert version == json.loads(Path("package.json").read_text())["version"]
+          assert manifest["commit"] == os.environ["RELEASE_COMMIT"], "Build commit mismatch"
+          assert manifest["preview"] is True, "Expected preview distribution"
+          tag = f"v{version}"
+          existing = subprocess.run(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"], capture_output=True, text=True)
+          if existing.returncode == 0:
+              assert existing.stdout.strip() == manifest["commit"], "Existing tag points to another commit"
+          changelog = Path("CHANGELOG.md").read_text()
+          section = re.search(rf"^## {re.escape(version)}(?:\s[^\n]*)?\n(.*?)(?=^## |\Z)", changelog, re.M | re.S)
+          assert section and section[1].strip(), "Missing version changelog"
+          notes = "开发预览：macOS Universal 已签名并公证；Windows x64 尚无 Authenticode。真实设备验收仍需单独完成。\n\n"
+          notes += section[1].strip() + f"\n\n构建提交：`{manifest['commit']}`\n"
+          notes += "\n附件与官网发布使用同一份 distribution；文件校验值见 SHA256SUMS。\n"
+          Path("release-notes.md").write_text(notes)
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              output.write(f"RELEASE_TAG={tag}\n")
+          PY
+      - name: Create GitHub pre-release with the published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$RELEASE_TAG" artifacts/distribution/* \
+            --target "$GITHUB_SHA" \
+            --title "25小厨 Desktop $RELEASE_TAG（开发预览）" \
+            --notes-file release-notes.md \
+            --prerelease --latest=false
+          gh release view "$RELEASE_TAG" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"

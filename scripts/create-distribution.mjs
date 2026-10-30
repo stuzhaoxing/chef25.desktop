@@ -106,7 +106,7 @@ await writeFile(
     {
       version,
       notes:
-        "新增应用内检查更新与确认安装；macOS 安装包通过 Developer ID 签名及 Apple 公证。更新会保留角色、聊天和配置。",
+        "关闭窗口收起到系统托盘，停止酒馆后恢复默认窗口尺寸。macOS 更新包已签名并公证；升级保留角色、聊天和配置。",
       pub_date: new Date().toISOString(),
       platforms: Object.fromEntries(
         Object.entries(aliases).map(([target, id]) => [
