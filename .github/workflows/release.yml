@@ -95,12 +95,15 @@ jobs:
         run: |
           arch -arm64 src-tauri/resources/runtime/node --version
           arch -x86_64 src-tauri/resources/runtime/node --version
+      - name: Install macOS DMG layout builder
+        if: runner.os == 'macOS'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/chef25-dmg-venv"
+          "$RUNNER_TEMP/chef25-dmg-venv/bin/python" -m pip install -r scripts/requirements-dmg.txt
+          echo "$RUNNER_TEMP/chef25-dmg-venv/bin" >> "$GITHUB_PATH"
       - name: Build macOS Universal installer
         if: runner.os == 'macOS'
         run: npm run desktop:build -- --target universal-apple-darwin --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
-      - name: Install macOS DMG layout builder
-        if: runner.os == 'macOS'
-        run: python3 -m pip install -r scripts/requirements-dmg.txt
       - name: Sign and notarize macOS app, updater and DMG
         if: runner.os == 'macOS'
         env:
