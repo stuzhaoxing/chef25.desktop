@@ -523,6 +523,7 @@ pub fn run() {
                 if let Some(window) = app.get_window("main") {
                     if let Err(error) = window.hide() {
                         eprintln!("Unable to hide main window: {error}");
+                        #[cfg(target_os = "macos")]
                         return;
                     }
                     #[cfg(target_os = "macos")]
