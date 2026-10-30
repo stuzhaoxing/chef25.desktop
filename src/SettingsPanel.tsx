@@ -124,9 +124,9 @@ export default function SettingsPanel({
         </SectionHeading>
         <div className="settings-row">
           <div className="settings-copy">
-            <p id="guide-toggle-label">显示入门教程</p>
+            <p id="guide-toggle-label">显示中文文档</p>
             <p id="guide-toggle-help">
-              在侧栏显示「酒馆入门」，关闭后可随时在这里恢复。
+              在侧栏显示「中文文档」，关闭后可随时在这里恢复。
             </p>
           </div>
           <Button

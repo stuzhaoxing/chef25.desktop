@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  25小厨 — macOS DMG 安装窗口背景图(源文件)。
+  窗口尺寸 680×460(= tauri.conf.json bundle.macOS.dmg.windowSize)。
+  Finder 会在此背景之上叠加两个 128px 图标(图标正下方还会渲染名称标签):
+    · 「25小厨」App  → appPosition            (200, 205)
+    · 「应用程序」文件夹 → applicationFolderPosition (480, 205)
+  本图与图标共用同一套内容坐标(左上原点、y 向下):
+    · 箭头落在两图标之间的间隙(x 264–416);
+    · 文件夹周围画虚线「落点环」+ 上方「拖到这里松手」提示,强化拖拽目标。
+  ⚠️ 提示文字放在文件夹**上方**(y≈108),避开 Finder 在图标下方渲染的「应用程序」名称标签。
+  改动后重新生成 PNG(视网膜 2x + 144dpi,让 Finder 按 680×460 点显示且高清):
+    rsvg-convert -w 1360 -h 920 background.svg -o background.png
+    sips -s dpiWidth 144 -s dpiHeight 144 background.png
+-->
+<svg width="680" height="460" viewBox="0 0 680 460" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FFF1E7"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0" r="0.85">
+      <stop offset="0" stop-color="#F15B35" stop-opacity="0.11"/>
+      <stop offset="0.6" stop-color="#F15B35" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="arrow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFAD76"/>
+      <stop offset="1" stop-color="#E6532F"/>
+    </linearGradient>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.1" fill="#F15B35" fill-opacity="0.045"/>
+    </pattern>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#E6532F" flood-opacity="0.30"/>
+    </filter>
+  </defs>
+
+  <!-- 底:浅色渐变 + 极淡点阵 + 顶部品牌橙光晕 -->
+  <rect width="680" height="460" fill="url(#bg)"/>
+  <rect width="680" height="460" fill="url(#dots)"/>
+  <rect width="680" height="460" fill="url(#glow)"/>
+
+  <!-- 说明文案(无大标题,单行上提居中) -->
+  <text x="340" y="60" text-anchor="middle"
+        font-family="PingFang SC, Hiragino Sans GB, Helvetica Neue, Arial, sans-serif"
+        font-size="15.5" font-weight="500" fill="#65534B">将 25小厨 拖入「应用程序」文件夹即可完成安装</text>
+
+  <!-- 文件夹落点环:围住右侧「应用程序」图标(128px),点明拖拽目标 -->
+  <circle cx="480" cy="205" r="86" fill="none" stroke="#F15B35" stroke-opacity="0.45"
+          stroke-width="2.5" stroke-dasharray="7 5"/>
+
+  <!-- 「拖到这里松手」提示胶囊:放文件夹上方,避开图标下方的系统名称标签 -->
+  <g filter="url(#soft)">
+    <rect x="424" y="95" width="112" height="27" rx="13.5" fill="url(#arrow)"/>
+  </g>
+  <text x="480" y="113" text-anchor="middle"
+        font-family="PingFang SC, Hiragino Sans GB, Helvetica Neue, Arial, sans-serif"
+        font-size="13" font-weight="600" fill="#FFFFFF">拖到这里松手</text>
+
+  <!-- 引导箭头:落在两图标之间的间隙(x 264–416),与图标同高(y=205),加粗醒目 -->
+  <g filter="url(#soft)">
+    <path d="M282 198 L380 198 L380 186 L414 205 L380 224 L380 212 L282 212 Z"
+          fill="url(#arrow)"/>
+  </g>
+</svg>

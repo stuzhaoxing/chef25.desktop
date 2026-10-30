@@ -44,3 +44,18 @@ P12 必须包含 Developer ID 中间证书链，避免只在开发者本机已�
 更新签名绑定应用版本，客户端开启 `requireSignedVersion`。macOS 更新归档是 `.app.tar.gz`；Windows 复用 EXE。官网仍只提供一个 DMG 和一个 EXE。客户端仅在用户确认后安装，先下载并验证更新，再停止自有酒馆进程并重启；应用数据目录不受覆盖。0.1.0 需手动安装一次 0.2.0。
 
 公证失败时用私有诊断查明原因，禁止跳过签名或修改状态标记发布。证书、更新密钥、P12 与账户配置不得提交仓库。发布前运行隐私检查，并在提交后再对实际提交执行检查。
+
+## macOS 安装引导
+
+DMG 使用 `src-tauri/dmg/background.svg`（可编辑源文件）及 `background.png`（1360×920、144 DPI）显示 680×460 点的暖橙色安装引导。App 与 Applications 位于 (200, 205) 和 (480, 205)。本机 Tauri 配置与发布用 `dmgbuild.py` 保持相同布局。
+
+发布前执行 `python3 -m pip install -r scripts/requirements-dmg.txt`（建议使用虚拟环境）；CI 自动安装。发布脚本通过 dmgbuild 直接写入 `.DS_Store`，不依赖 Finder 自动化权限，然后继续签名、公证及装订 DMG。布局变更仍需新版本发布，不覆盖线上旧包。
+
+更新背景后执行：
+
+```sh
+rsvg-convert -w 1360 -h 920 src-tauri/dmg/background.svg -o src-tauri/dmg/background.png
+sips -s dpiWidth 144 -s dpiHeight 144 src-tauri/dmg/background.png
+```
+
+挂载最终安装包，检查背景、箭头、中文提示、两个真实图标和标签无重叠，并实际拖入 Applications 验收。仅检查图片或 `.DS_Store` 存在不能替代 Finder 视觉验收。

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Share searchable Chinese usage documentation with the website in an isolated view.
+- Refresh macOS icons and add a guided drag-to-install disk image layout.
+- Distinguish development icons while preserving production app identity.
+
 ## 0.3.0 — 2026-10-29
 
 - 侧栏停止服务改为运行状态旁的轻量电源按钮，常态使用红色图标与文字、浅红底和细描边，执行期间显示「停止中…」。

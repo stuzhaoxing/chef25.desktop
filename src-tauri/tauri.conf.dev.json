@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; connect-src ipc: http://ipc.localhost http://127.0.0.1:25251 ws://127.0.0.1:25251; object-src 'none'; frame-src http://127.0.0.1:25250/guides/sillytavern http://127.0.0.1:25250/guides/sillytavern/; base-uri 'self'"
+    }
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "icon": [
+      "icons-dev/32x32.png",
+      "icons-dev/128x128.png",
+      "icons-dev/128x128@2x.png",
+      "icons-dev/icon.icns",
+      "icons-dev/icon.ico",
+      "icons-dev/Assets.car"
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 {
   "name": "chef25-desktop",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -9,7 +9,8 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "tauri": "tauri",
-    "desktop:dev": "tauri dev",
+    "desktop:dev": "tauri dev --config src-tauri/tauri.conf.dev.json",
+    "desktop:build:dev": "node scripts/check-runtime.mjs && tauri build --debug --config src-tauri/tauri.conf.dev.json",
     "desktop:build": "node scripts/check-runtime.mjs && tauri build",
     "runtime:prepare": "node --use-env-proxy scripts/prepare-runtime.mjs",
     "runtime:check": "node scripts/check-runtime.mjs",
@@ -31,7 +32,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
-    "@tauri-apps/cli": "^2.10.0",
+    "@tauri-apps/cli": "^2.12.4",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

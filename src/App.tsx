@@ -135,7 +135,7 @@ export default function App() {
           {[
             { id: "tavern", label: "我的酒馆", icon: Coffee },
             { id: "data", label: "本地数据", icon: FolderHeart },
-            { id: "help", label: "酒馆入门", icon: CircleHelp },
+            { id: "help", label: "中文文档", icon: CircleHelp },
             { id: "settings", label: "设置", icon: Settings },
           ]
             .filter(({ id }) => id !== "help" || showGuide)
@@ -203,7 +203,7 @@ export default function App() {
                   ? "本地数据"
                   : tab === "settings"
                     ? "设置"
-                    : "酒馆入门"}
+                    : "中文文档"}
             </h1>
           </div>
           {tab === "tavern" && (
