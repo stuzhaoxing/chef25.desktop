@@ -7,9 +7,64 @@ mod updates;
 use service::{Service, Status};
 use std::sync::Arc;
 use tauri::{
-    webview::WebviewBuilder, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl,
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    webview::WebviewBuilder,
+    LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl,
 };
 use tauri_plugin_dialog::DialogExt;
+
+fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    #[cfg(target_os = "macos")]
+    app.set_dock_visibility(true)?;
+    if let Some(window) = app.get_window("main") {
+        window.unminimize()?;
+        window.show()?;
+        window.set_focus()?;
+    }
+    Ok(())
+}
+
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "tray-show", "显示主窗口", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "tray-quit", "退出 25小厨", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let icon = app
+        .default_window_icon()
+        .ok_or_else(|| tauri::Error::AssetNotFound("application icon".into()))?
+        .clone();
+    TrayIconBuilder::with_id("main-tray")
+        .icon(icon)
+        .tooltip("25小厨")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray-show" => {
+                if let Err(error) = show_main_window(app) {
+                    eprintln!("Unable to restore main window: {error}");
+                }
+            }
+            // Use the same ExitRequested cleanup as the launcher/system quit.
+            "tray-quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+            ) {
+                if let Err(error) = show_main_window(tray.app_handle()) {
+                    eprintln!("Unable to restore main window: {error}");
+                }
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
 
 fn require_launcher(window: &tauri::Webview) -> Result<(), String> {
     if window.label() == "main" {
@@ -255,16 +310,23 @@ async fn stop_service(
 fn resize_workspace(window: tauri::Webview, expanded: bool) -> Result<(), String> {
     require_launcher(&window)?;
     let window = window.window();
-    // Preserve an explicit fullscreen/maximized choice.
-    if window.is_fullscreen().map_err(|_| "无法读取窗口状态")?
-        || window.is_maximized().map_err(|_| "无法读取窗口状态")?
-    {
-        return Ok(());
-    }
     if expanded {
+        // Preserve an existing fullscreen choice while entering the tavern.
+        if window.is_fullscreen().map_err(|_| "无法读取窗口状态")?
+            || window.is_maximized().map_err(|_| "无法读取窗口状态")?
+        {
+            return Ok(());
+        }
         // Native maximize fills the desktop work area without entering fullscreen.
         return window.maximize().map_err(|_| "无法最大化窗口".into());
     }
+    // Restore the launcher even when the tavern maximized the window itself.
+    if window.is_fullscreen().map_err(|_| "无法读取窗口状态")? {
+        window
+            .set_fullscreen(false)
+            .map_err(|_| "无法退出全屏".to_string())?;
+    }
+    window.unmaximize().map_err(|_| "无法还原窗口")?;
     let scale = window.scale_factor().map_err(|_| "无法读取窗口缩放")?;
     let mut size = compact_workspace_size();
     if let Some(monitor) = window.current_monitor().map_err(|_| "无法读取屏幕尺寸")? {
@@ -408,10 +470,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::Updates::default())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(window) = app.get_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+            if let Err(error) = show_main_window(app) {
+                eprintln!("Unable to restore main window: {error}");
             }
         }))
         .setup(|app| {
@@ -424,6 +484,7 @@ pub fn run() {
                 resources,
                 app.path().app_data_dir()?,
             )));
+            setup_tray(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -460,17 +521,20 @@ pub fn run() {
                 // Closing only folds away the window; the tavern keeps running.
                 api.prevent_close();
                 if let Some(window) = app.get_window("main") {
-                    if let Err(error) = window.minimize() {
-                        eprintln!("Unable to minimize main window: {error}");
+                    if let Err(error) = window.hide() {
+                        eprintln!("Unable to hide main window: {error}");
+                        return;
+                    }
+                    #[cfg(target_os = "macos")]
+                    if let Err(error) = app.set_dock_visibility(false) {
+                        eprintln!("Unable to hide Dock icon: {error}");
                     }
                 }
             }
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => {
-                if let Some(window) = app.get_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
+                if let Err(error) = show_main_window(app) {
+                    eprintln!("Unable to restore main window: {error}");
                 }
             }
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
