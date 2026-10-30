@@ -19,6 +19,9 @@ pub struct Entry {
 // Resolve only relative paths below the app-owned root. Links are listed but
 // never followed, including junctions/reparse points on Windows.
 fn resolve(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    if Path::new(relative).components().any(|c| matches!(c, Component::Normal(n) if n.to_string_lossy().eq_ignore_ascii_case("private-remote"))) {
+        return Err("设备凭据不可浏览".into());
+    }
     let mut target = root.to_path_buf();
     for component in Path::new(relative).components() {
         let Component::Normal(name) = component else {
@@ -32,8 +35,11 @@ fn resolve(root: &Path, relative: &str) -> Result<PathBuf, String> {
     }
     let canonical_root = root.canonicalize().map_err(|_| "无法访问存储目录")?;
     let canonical_target = target.canonicalize().map_err(|_| "文件已移动或无法访问")?;
-    if !canonical_target.starts_with(canonical_root) {
+    if !canonical_target.starts_with(&canonical_root) {
         return Err("只能浏览本地数据目录内的文件".into());
+    }
+    if canonical_target.strip_prefix(&canonical_root).map_err(|_| "无法解析文件路径")?.components().any(|c| matches!(c, Component::Normal(n) if n.to_string_lossy().trim_end_matches(['.', ' ']).eq_ignore_ascii_case("private-remote"))) {
+        return Err("设备凭据不可浏览".into());
     }
     Ok(canonical_target)
 }
@@ -60,6 +66,9 @@ pub fn list(root: &Path, relative: &str) -> Result<Vec<Entry>, String> {
             .file_name()
             .into_string()
             .map_err(|_| "文件名编码不受支持")?;
+        if name.eq_ignore_ascii_case("private-remote") {
+            continue;
+        }
         let metadata = fs::symlink_metadata(entry.path()).map_err(|_| "文件已变化，请刷新重试")?;
         let kind = if is_link(&metadata) {
             "link"
@@ -86,10 +95,7 @@ pub fn list(root: &Path, relative: &str) -> Result<Vec<Entry>, String> {
                 .map(|d| d.as_secs()),
         });
     }
-    entries.sort_by(|a, b| {
-        (a.kind != "directory", a.name.to_lowercase())
-            .cmp(&(b.kind != "directory", b.name.to_lowercase()))
-    });
+    entries.sort_by_cached_key(|entry| (entry.kind != "directory", entry.name.to_lowercase()));
     Ok(entries)
 }
 

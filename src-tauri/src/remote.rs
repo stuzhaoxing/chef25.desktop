@@ -1,13 +1,5 @@
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoteRequest {
-    pub configuration: String,
-    pub public_url: String,
-    pub password: String,
-}
+use base64::{engine::general_purpose::STANDARD, Engine};
+use serde::Serialize;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,170 +7,203 @@ pub struct RemoteStatus {
     pub enabled: bool,
     pub public_url: String,
     pub message: String,
+    pub password: String,
 }
 
 pub fn disabled(message: &str) -> RemoteStatus {
     RemoteStatus {
         enabled: false,
+        password: String::new(),
         public_url: String::new(),
         message: message.into(),
     }
 }
 
-// Accept only a narrow INI subset. Never forward plugins, includes, executable
-// token sources, admin listeners, arbitrary local targets or extra proxies.
-pub fn configuration(input: &str, local_port: u16) -> Result<String, String> {
-    if input.len() > 32_768 || input.contains(['\0', '\r', '`']) || input.contains("{{") {
-        return Err("隧道配置无效，请复制 OpenFrp 的 INI 配置".into());
+// Accept a connector token, never a full shell command or account-wide API key.
+// The token is passed to cloudflared through a private file, not process arguments.
+pub fn validate_token(input: &str) -> Result<(), String> {
+    let invalid = "分配的 Cloudflare 隧道凭据无效，请稍后重试";
+    let token = input.trim();
+    if token.is_empty() || token.len() > 8192 {
+        return Err(invalid.into());
     }
-    let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
-    let mut current = String::new();
-    for line in input.lines().map(str::trim) {
-        if line.is_empty() || line.starts_with(['#', ';']) {
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            current = line[1..line.len() - 1].to_string();
-            if current.is_empty()
-                || !current
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
-                || sections.contains_key(&current)
-            {
-                return Err("隧道配置包含无效或重复的分区".into());
+    let bytes = STANDARD.decode(token).map_err(|_| invalid)?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| invalid)?;
+    let account = value["a"].as_str().ok_or(invalid)?;
+    let tunnel = value["t"].as_str().ok_or(invalid)?;
+    let secret = value["s"].as_str().ok_or(invalid)?;
+    if account.len() != 32
+        || !account.bytes().all(|c| c.is_ascii_hexdigit())
+        || tunnel.len() != 36
+        || !tunnel.bytes().enumerate().all(|(i, c)| {
+            if [8, 13, 18, 23].contains(&i) {
+                c == b'-'
+            } else {
+                c.is_ascii_hexdigit()
             }
-            sections.insert(current.clone(), BTreeMap::new());
-            continue;
-        }
-        let (key, value) = line
-            .split_once('=')
-            .ok_or("只支持 OpenFrp INI 配置，每行应为 key = value")?;
-        let (key, value) = (key.trim(), value.trim());
-        let allowed = if current == "common" {
-            [
-                "server_addr",
-                "server_port",
-                "user",
-                "token",
-                "authentication_method",
-                "tls_enable",
-                "protocol",
-                "meta_token",
-                "login_fail_exit",
-                "dns_server",
-                "tcp_mux",
-                "log_level",
-                "log_file",
-                "log_max_days",
-                "disable_log_color",
-            ]
-            .contains(&key)
-        } else {
-            [
-                "type",
-                "local_ip",
-                "local_port",
-                "remote_port",
-                "custom_domains",
-                "subdomain",
-                "use_encryption",
-                "use_compression",
-                "host_header_rewrite",
-            ]
-            .contains(&key)
-        };
-        if !allowed || value.is_empty() || value.contains(['\n', ';', '#', '[', ']']) {
-            return Err("配置包含不支持的选项；请使用仅包含一个 HTTP 隧道的基础 INI 配置".into());
-        }
-        let section = sections.get_mut(&current).ok_or("配置缺少分区")?;
-        if section.insert(key.into(), value.into()).is_some() {
-            return Err("配置项重复".into());
-        }
-    }
-    if sections.len() != 2 {
-        return Err("请导入 common 和一个 HTTP 隧道，共两个分区".into());
-    }
-    let common = sections.get_mut("common").ok_or("配置缺少 common 分区")?;
-    for key in ["server_addr", "server_port", "token"] {
-        if !common.contains_key(key) {
-            return Err(format!("配置缺少 {key}"));
-        }
-    }
-    let port: u16 = common["server_port"]
-        .parse()
-        .map_err(|_| "服务器端口无效")?;
-    if port == 0 {
-        return Err("服务器端口无效".into());
-    }
-    if !common["server_addr"]
-        .bytes()
-        .all(|c| c.is_ascii_alphanumeric() || b".-".contains(&c))
+        })
+        // Cloudflare requires at least 32 bytes; managed tunnels can use 64.
+        || STANDARD
+            .decode(secret)
+            .map_or(true, |bytes| bytes.len() < 32)
     {
-        return Err("节点地址无效".into());
+        return Err(invalid.into());
     }
-    // Defaults are enforced rather than trusting supplied safety settings.
-    common.insert("tls_enable".into(), "true".into());
-    common.insert("login_fail_exit".into(), "true".into());
-    common.insert("protocol".into(), "tcp".into());
-    common.remove("dns_server");
-    for key in [
-        "tcp_mux",
-        "log_level",
-        "log_file",
-        "log_max_days",
-        "disable_log_color",
-    ] {
-        common.remove(key);
-    }
-    common.insert("log_file".into(), "console".into());
-    common.insert("log_level".into(), "error".into());
-    let proxy = sections
-        .iter_mut()
-        .find(|(name, _)| name.as_str() != "common")
-        .unwrap()
-        .1;
-    if proxy.get("type").map(String::as_str) != Some("http") {
-        return Err("首版仅支持 HTTP 隧道，外网入口须由节点提供 HTTPS".into());
-    }
-    if !proxy.contains_key("custom_domains") && !proxy.contains_key("subdomain") {
-        return Err("隧道缺少域名配置".into());
-    }
-    proxy.insert("local_ip".into(), "127.0.0.1".into());
-    proxy.insert("local_port".into(), local_port.to_string());
-    proxy.insert("use_encryption".into(), "true".into());
-    proxy.remove("remote_port");
-    proxy.remove("host_header_rewrite");
-    let mut output = String::new();
-    for (name, values) in sections {
-        output.push_str(&format!("[{name}]\n"));
-        for (key, value) in values {
-            output.push_str(&format!("{key} = {value}\n"));
-        }
-    }
-    Ok(output)
+    Ok(())
 }
 
-pub fn validate(request: &RemoteRequest) -> Result<String, String> {
-    if request.password.len() < 16
-        || request.password.len() > 128
-        || request.password.chars().any(char::is_control)
-    {
-        return Err("访问密码须为 16–128 字节且不含控制字符".into());
-    }
-    let url = reqwest::Url::parse(request.public_url.trim())
-        .map_err(|_| "请输入有效的 HTTPS 访问地址")?;
+// A router can retain the old wildcard answer while a new tunnel DNS record
+// propagates. Resolve only our allocated hostname through Cloudflare's public
+// resolver; keep the original URL, TLS hostname checks and gateway marker.
+pub fn fresh_dns_client(public_url: &str) -> Result<reqwest::blocking::Client, String> {
+    use hickory_proto::{
+        op::{Message, Query},
+        rr::{Name, RecordType},
+    };
+    use std::net::UdpSocket;
+    let invalid = "无法刷新远程入口解析";
+    let url = reqwest::Url::parse(public_url).map_err(|_| invalid)?;
+    let host = url.host_str().ok_or(invalid)?;
+    let device = host
+        .strip_prefix("r-")
+        .and_then(|s| s.strip_suffix(".chef25.com"))
+        .ok_or(invalid)?;
     if url.scheme() != "https"
-        || url.host_str().is_none()
+        || url.port().is_some()
         || !url.username().is_empty()
         || url.password().is_some()
+        || url.path() != "/"
         || url.query().is_some()
         || url.fragment().is_some()
-        || url.path() != "/"
+        || device.len() != 60
+        || !device.bytes().all(|b| b.is_ascii_hexdigit())
     {
-        return Err("访问地址必须是 HTTPS 根地址，不能包含账号、密码或路径".into());
+        return Err(invalid.into());
     }
-    configuration(&request.configuration.replace("\r\n", "\n"), 1)?;
-    Ok(url.to_string())
+    let mut random = [0u8; 2];
+    getrandom::fill(&mut random).map_err(|_| invalid)?;
+    let query = Query::query(
+        Name::from_ascii(format!("{host}.")).map_err(|_| invalid)?,
+        RecordType::A,
+    );
+    let mut request = Message::new();
+    request
+        .set_id(u16::from_be_bytes(random))
+        .set_recursion_desired(true)
+        .add_query(query.clone());
+    let socket = UdpSocket::bind("0.0.0.0:0").map_err(|_| invalid)?;
+    socket
+        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .map_err(|_| invalid)?;
+    socket
+        .set_write_timeout(Some(std::time::Duration::from_secs(2)))
+        .map_err(|_| invalid)?;
+    socket.connect("1.1.1.1:53").map_err(|_| invalid)?;
+    socket
+        .send(&request.to_vec().map_err(|_| invalid)?)
+        .map_err(|_| invalid)?;
+    let mut buffer = [0u8; 4096];
+    let size = socket.recv(&mut buffer).map_err(|_| invalid)?;
+    let answer = Message::from_vec(&buffer[..size]).map_err(|_| invalid)?;
+    let addresses = dns_addresses(&answer, &query, request.id());
+    if addresses.is_empty() {
+        return Err(invalid.into());
+    }
+    reqwest::blocking::Client::builder()
+        .no_proxy()
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(3))
+        .resolve_to_addrs(host, &addresses)
+        .build()
+        .map_err(|_| invalid.into())
+}
+
+fn dns_addresses(
+    answer: &hickory_proto::op::Message,
+    query: &hickory_proto::op::Query,
+    id: u16,
+) -> Vec<std::net::SocketAddr> {
+    use hickory_proto::{
+        op::{MessageType, ResponseCode},
+        rr::RData,
+    };
+    if answer.id() != id
+        || answer.message_type() != MessageType::Response
+        || answer.truncated()
+        || answer.response_code() != ResponseCode::NoError
+        || answer.queries() != [query.clone()]
+    {
+        return Vec::new();
+    }
+    answer
+        .answers()
+        .iter()
+        .filter(|r| r.name() == query.name())
+        .filter_map(|r| match r.data() {
+            RData::A(ip) => Some(ip.0),
+            _ => None,
+        })
+        .filter(|ip| {
+            !ip.is_private()
+                && !ip.is_loopback()
+                && !ip.is_link_local()
+                && ip.octets()[0] != 0
+                && ip.octets()[0] < 224
+        })
+        .take(8)
+        .map(|ip| std::net::SocketAddr::new(ip.into(), 443))
+        .collect()
+}
+
+pub fn tunnel_command(
+    executable: &std::path::Path,
+    files: &std::path::Path,
+    token: &str,
+) -> Result<std::process::Command, String> {
+    use std::io::Write;
+    let path = files.join("tunnel-token");
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options
+        .open(&path)
+        .and_then(|mut f| f.write_all(token.trim().as_bytes()))
+        .map_err(|_| "无法写入临时隧道凭据")?;
+    // Do not discover a user's unrelated ~/.cloudflared/config.yml or inherit
+    // TUNNEL_* overrides (token, logs, origins, management listeners, etc.).
+    let config = files.join("config.json");
+    std::fs::write(&config, b"{}").map_err(|_| "无法写入隧道设置")?;
+    let mut command = std::process::Command::new(executable);
+    command.env_clear();
+    for name in ["SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    command
+        .arg("tunnel")
+        .arg("--config")
+        .arg(config)
+        .arg("--no-autoupdate")
+        .args(["--metrics", "127.0.0.1:0"])
+        .arg("run")
+        .arg("--token-file")
+        .arg(path)
+        .current_dir(files)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    Ok(command)
 }
 
 /// Download only the pinned official client. Never execute a renderer-provided
@@ -188,7 +213,7 @@ pub fn client(data: &std::path::Path) -> Result<std::path::PathBuf, String> {
     use std::io::{Read, Write};
     let lock: serde_json::Value = serde_json::from_str(include_str!("../../runtime.lock.json"))
         .map_err(|_| "客户端清单无效")?;
-    let spec = &lock["openfrp"];
+    let spec = &lock["cloudflared"];
     let target = if cfg!(target_os = "windows") {
         "windows-amd64"
     } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
@@ -196,12 +221,15 @@ pub fn client(data: &std::path::Path) -> Result<std::path::PathBuf, String> {
     } else if cfg!(target_os = "macos") {
         "darwin-amd64"
     } else {
-        return Err("当前平台不支持 OpenFrp 客户端".into());
+        return Err("当前平台不支持 Cloudflare 客户端".into());
     };
     let archive = &spec["archives"][target];
-    let root = data.join("remote-client");
+    let root = data.join("remote-client").join("cloudflared");
     std::fs::create_dir_all(&root).map_err(|_| "无法创建客户端目录")?;
-    let file_name = format!("frpc_{target}{}", if cfg!(windows) { ".exe" } else { "" });
+    let file_name = format!(
+        "cloudflared_{target}{}",
+        if cfg!(windows) { ".exe" } else { "" }
+    );
     let destination = root.join(&file_name);
     let cache = root.join(archive["file"].as_str().ok_or("客户端清单无效")?);
     let expected = archive["sha256"].as_str().ok_or("客户端校验值缺失")?;
@@ -223,7 +251,7 @@ pub fn client(data: &std::path::Path) -> Result<std::path::PathBuf, String> {
                 .get(url)
                 .send()
                 .and_then(|r| r.error_for_status())
-                .map_err(|_| "OpenFrp 客户端下载失败，请检查网络后重试")?;
+                .map_err(|_| "Cloudflare 客户端下载失败，请检查网络后重试")?;
             let mut bytes = Vec::new();
             response
                 .take(64 * 1024 * 1024 + 1)
@@ -239,26 +267,17 @@ pub fn client(data: &std::path::Path) -> Result<std::path::PathBuf, String> {
             bytes
         }
     };
-    let expected_entry = format!(
-        "frpc_{}{}",
-        target.replace('-', "_"),
-        if cfg!(windows) { ".exe" } else { "" }
-    );
+    let expected_entry = "cloudflared";
     let mut extracted = Vec::new();
     if cfg!(windows) {
-        let mut zip =
-            zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|_| "客户端归档无效")?;
-        let entry = zip.by_name(&expected_entry).map_err(|_| "归档缺少客户端")?;
-        entry
-            .take(128 * 1024 * 1024 + 1)
-            .read_to_end(&mut extracted)
-            .map_err(|_| "无法解压客户端")?;
+        // The official Windows asset is a raw executable, not a ZIP archive.
+        extracted = bytes;
     } else {
         let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes.as_slice()));
         for entry in archive.entries().map_err(|_| "客户端归档无效")? {
             let entry = entry.map_err(|_| "客户端归档无效")?;
             if entry.path().map_err(|_| "归档路径无效")?.as_ref()
-                == std::path::Path::new(&expected_entry)
+                == std::path::Path::new(expected_entry)
                 && entry.header().entry_type().is_file()
             {
                 entry
@@ -290,77 +309,224 @@ pub fn client(data: &std::path::Path) -> Result<std::path::PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const SAMPLE: &str = "[common]\nserver_addr = node.example.com\nserver_port = 7000\ntoken = example\nuser = demo\n[demo]\ntype = http\ncustom_domains = tavern.example.com\nlocal_ip = 192.168.0.5\nlocal_port = 80\n";
+
     #[test]
-    fn rewrites_target_and_requires_safe_subset() {
-        let result = configuration(SAMPLE, 12345).unwrap();
-        assert!(result.contains("local_ip = 127.0.0.1"));
-        assert!(result.contains("local_port = 12345"));
-        assert!(result.contains("tls_enable = true"));
-        for extra in [
-            "plugin = http_proxy",
-            "includes = /tmp/evil",
-            "local_port = 22",
-            "[other]\ntype = tcp",
-        ] {
-            assert!(configuration(&format!("{SAMPLE}{extra}\n"), 12345).is_err());
+    fn fresh_dns_answers_require_matching_transaction_question_and_public_ipv4() {
+        use hickory_proto::{
+            op::{Message, MessageType, Query},
+            rr::{rdata::A, Name, RData, Record, RecordType},
+        };
+        let name = Name::from_ascii(format!("r-{}.chef25.com.", "0".repeat(60))).unwrap();
+        let query = Query::query(name.clone(), RecordType::A);
+        let mut answer = Message::new();
+        answer
+            .set_id(42)
+            .set_message_type(MessageType::Response)
+            .add_query(query.clone());
+        for ip in ["104.21.16.172", "127.0.0.1", "192.168.1.1", "224.0.0.1"] {
+            answer.add_answer(Record::from_rdata(
+                name.clone(),
+                60,
+                RData::A(A(ip.parse().unwrap())),
+            ));
         }
-        assert!(configuration(&SAMPLE.replace("type = http", "type = tcp"), 1).is_err());
-        assert!(configuration(&SAMPLE.replace("example", "{{ .Envs.SECRET }}"), 1).is_err());
-    }
-    #[test]
-    #[ignore = "verifies the pinned optional client in an isolated temp directory"]
-    fn official_client_accepts_generated_config() {
-        let data = tempfile::tempdir().unwrap();
-        if let Ok(archives) = std::env::var("CHEF25_OPENFRP_ARCHIVES") {
-            let filename = if cfg!(windows) {
-                "frpc_windows_amd64.zip"
-            } else if cfg!(target_arch = "aarch64") {
-                "frpc_darwin_arm64.tar.gz"
-            } else {
-                "frpc_darwin_amd64.tar.gz"
-            };
-            std::fs::create_dir(data.path().join("remote-client")).unwrap();
-            std::fs::copy(
-                std::path::Path::new(&archives).join(filename),
-                data.path().join("remote-client").join(filename),
-            )
-            .unwrap();
-        }
-        let executable = client(data.path()).unwrap();
-        let original = std::fs::read(&executable).unwrap();
-        std::fs::write(&executable, b"corrupted executable").unwrap();
-        let repaired = client(data.path()).unwrap();
-        assert_eq!(std::fs::read(repaired).unwrap(), original);
-        let config = data.path().join("test.ini");
-        std::fs::write(&config, configuration(SAMPLE, 12345).unwrap()).unwrap();
-        let result = std::process::Command::new(executable)
-            .arg("verify")
-            .arg("--config")
-            .arg(config)
-            .arg("--noupdate")
-            .output()
-            .unwrap();
-        assert!(
-            result.status.success(),
-            "Official client rejected the generated config"
+        answer.add_answer(Record::from_rdata(
+            Name::from_ascii("other.chef25.com.").unwrap(),
+            60,
+            RData::A(A("104.21.16.172".parse().unwrap())),
+        ));
+        let addresses = dns_addresses(&answer, &query, 42);
+        assert_eq!(addresses.len(), 1);
+        assert_eq!(addresses[0].to_string(), "104.21.16.172:443");
+        assert!(dns_addresses(&answer, &query, 43).is_empty());
+        let other = Query::query(
+            Name::from_ascii("other.chef25.com.").unwrap(),
+            RecordType::A,
         );
+        assert!(dns_addresses(&answer, &other, 42).is_empty());
+        answer.set_truncated(true);
+        assert!(dns_addresses(&answer, &query, 42).is_empty());
     }
 
     #[test]
-    fn requires_https_and_password() {
+    fn fresh_dns_rejects_unallocated_urls_before_networking() {
         for url in [
-            "http://example.com",
-            concat!("https://", "user:pass", "@example.com"),
-            "https://example.com/path",
-            "https://example.com/?token=x",
+            "https://example.com/",
+            "https://r-short.chef25.com/",
+            "http://r-short.chef25.com/",
+            "https://www.chef25.com/",
         ] {
-            assert!(validate(&RemoteRequest {
-                configuration: SAMPLE.into(),
-                public_url: url.into(),
-                password: "a long test password".into()
-            })
-            .is_err());
+            assert!(fresh_dns_client(url).is_err());
         }
+    }
+
+    #[test]
+    #[ignore = "requires an isolated live gateway and temporary Cloudflare lease"]
+    fn fresh_dns_verifies_live_gateway_with_tls() {
+        let url = std::env::var("CHEF25_TEST_REMOTE_URL").expect("isolated gateway URL required");
+        let response = fresh_dns_client(&url).unwrap().get(&url).send().unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response.headers()["x-chef25-gateway"],
+            "chef25-diagnostic-probe"
+        );
+    }
+
+    fn sample_token() -> String {
+        STANDARD.encode(
+            serde_json::json!({
+                "a": "0".repeat(32),
+                "t": "00000000-0000-0000-0000-000000000001",
+                "s": STANDARD.encode([0u8; 32])
+            })
+            .to_string(),
+        )
+    }
+
+    #[test]
+    fn rejects_commands_api_keys_and_malformed_connector_tokens() {
+        let token = sample_token();
+        assert!(validate_token(&format!(" {token}\n")).is_ok());
+        for invalid in [
+            String::new(),
+            "api-key".into(),
+            format!("cloudflared tunnel run --token {token}"),
+            STANDARD.encode("{}"),
+            "A".repeat(8193),
+            STANDARD.encode(r#"{"a":"bad","t":"bad","s":"bad"}"#),
+        ] {
+            let error = validate_token(&invalid).unwrap_err();
+            assert!(!error.contains(&token));
+        }
+    }
+
+    #[test]
+    fn accepts_managed_secrets_and_rejects_short_or_invalid_secrets() {
+        for size in [0, 1, 31, 32, 33, 64] {
+            let token = STANDARD.encode(
+                serde_json::json!({
+                    "a": "0".repeat(32),
+                    "t": "00000000-0000-0000-0000-000000000001",
+                    "s": STANDARD.encode(vec![0u8; size])
+                })
+                .to_string(),
+            );
+            assert_eq!(validate_token(&token).is_ok(), size >= 32);
+        }
+        let token = STANDARD.encode(
+            serde_json::json!({
+                "a": "0".repeat(32),
+                "t": "00000000-0000-0000-0000-000000000001",
+                "s": "!".repeat(88)
+            })
+            .to_string(),
+        );
+        assert!(validate_token(&token).is_err());
+    }
+
+    #[test]
+    fn connector_uses_private_token_file_and_isolated_configuration() {
+        let dir = tempfile::tempdir().unwrap();
+        let token = sample_token();
+        let command =
+            tunnel_command(std::path::Path::new("cloudflared"), dir.path(), &token).unwrap();
+        assert!(command
+            .get_args()
+            .all(|arg| !arg.to_string_lossy().contains(&token)));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("tunnel-token")).unwrap(),
+            token
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("config.json")).unwrap(),
+            "{}"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(dir.path().join("tunnel-token"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        assert!(tunnel_command(std::path::Path::new("cloudflared"), dir.path(), &token).is_err());
+        let path = dir.path().to_path_buf();
+        drop(command);
+        drop(dir);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    #[ignore = "downloads and checks the official client in an isolated temporary directory"]
+    fn official_client_accepts_generated_flags_and_repairs_corrupt_cache() {
+        let data = tempfile::tempdir().unwrap();
+        let executable = client(data.path()).unwrap();
+        let original = std::fs::read(&executable).unwrap();
+        std::fs::write(&executable, b"corrupted executable").unwrap();
+        assert_eq!(
+            std::fs::read(client(data.path()).unwrap()).unwrap(),
+            original
+        );
+        let version = std::process::Command::new(&executable)
+            .arg("--version")
+            .output()
+            .unwrap();
+        assert!(version.status.success());
+        assert!(String::from_utf8_lossy(&version.stdout).contains("2026.10.6"));
+        let files = tempfile::tempdir().unwrap();
+        let mut command = tunnel_command(&executable, files.path(), &sample_token()).unwrap();
+        // Help parses the exact run flags without making any tunnel connection.
+        let output = command
+            .arg("--help")
+            .stdout(std::process::Stdio::piped())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "official client rejected the run flags"
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("--token-file"));
+        let invalid_files = tempfile::tempdir().unwrap();
+        let output = tunnel_command(&executable, invalid_files.path(), "invalid")
+            .unwrap()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .unwrap();
+        // Exercise config loading and token-file reading, not just --help.
+        // This deliberately malformed token is rejected before networking.
+        assert!(!output.status.success());
+        let diagnostic = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            diagnostic.contains("Provided Tunnel token is not valid"),
+            "unexpected startup diagnostic: {diagnostic}"
+        );
+        let lock: serde_json::Value =
+            serde_json::from_str(include_str!("../../runtime.lock.json")).unwrap();
+        let target = if cfg!(windows) {
+            "windows-amd64"
+        } else if cfg!(target_arch = "aarch64") {
+            "darwin-arm64"
+        } else {
+            "darwin-amd64"
+        };
+        let cache = data.path().join("remote-client/cloudflared").join(
+            lock["cloudflared"]["archives"][target]["file"]
+                .as_str()
+                .unwrap(),
+        );
+        std::fs::write(cache, b"corrupted download").unwrap();
+        assert_eq!(
+            std::fs::read(client(data.path()).unwrap()).unwrap(),
+            original
+        );
     }
 }

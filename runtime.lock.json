@@ -20,21 +20,21 @@
       }
     }
   },
-  "openfrp": {
-    "version": "OF_0.68.0_37f78258_260326",
-    "baseUrl": "https://staticassets.naids.com/client/OF_0.68.0_37f78258_260326/",
+  "cloudflared": {
+    "version": "2026.10.6",
+    "baseUrl": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.6/",
     "archives": {
       "darwin-arm64": {
-        "file": "frpc_darwin_arm64.tar.gz",
-        "sha256": "f64f98d05d5da0f81ba56fbfa6e4e80d64a6cc3ef387242bada4a49210d1578e"
+        "file": "cloudflared-darwin-arm64.tgz",
+        "sha256": "ea1e5105d35bbe16cee5b2f7b4742059ada341fbd35938ed827c24b85efa51c8"
       },
       "darwin-amd64": {
-        "file": "frpc_darwin_amd64.tar.gz",
-        "sha256": "27a0fb49dbc852196cb8f8b855fa8c482ea50fea196c150ec39d576042674dc6"
+        "file": "cloudflared-darwin-amd64.tgz",
+        "sha256": "6c04a13835ca5ff29a0c6f58d17d1f3956aad1b7df1631f5b5efbc06269deded"
       },
       "windows-amd64": {
-        "file": "frpc_windows_amd64.zip",
-        "sha256": "48705664b9d9246098c93a6b51a8d27409fd5d9f6b475808032c4a946e4be08d"
+        "file": "cloudflared-windows-amd64.exe",
+        "sha256": "d521b3bf68982165f0d06d76732f22d9a105ef057ff3ae4c0986f3a23190950f"
       }
     }
   }

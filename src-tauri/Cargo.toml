@@ -1,6 +1,6 @@
 [package]
 name = "chef25-desktop"
-version = "0.3.3"
+version = "0.3.4"
 description = "A small kitchen for your SillyTavern"
 authors = ["Chef25 contributors"]
 edition = "2021"
@@ -28,8 +28,11 @@ tauri-plugin-dialog = "=2.7.2"
 zip = { version = "=4.6.1", default-features = false, features = ["deflate"] }
 tempfile = "3.27.0"
 sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.3"
 flate2 = "1"
 tar = "0.4"
+hickory-proto = { version = "0.25", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -1,23 +1,24 @@
 import Dialog from "./components/Dialog";
 import BrandMark from "./components/BrandMark";
-import Button, { IconButton } from "./components/Button";
+import { IconButton } from "./components/Button";
 import { X } from "lucide-react";
 import { version } from "../package.json";
 import { version as sillyTavernVersion } from "../runtime.lock.json";
 import UpdatePanel from "./UpdatePanel";
+import DeveloperContact from "./DeveloperContact";
 
 export default function AboutDialog({
   open,
   onClose,
-  onContact,
   disabled,
   onBusyChange,
+  onAvailableVersionChange,
 }: {
   open: boolean;
   onClose: () => void;
-  onContact: () => void;
   disabled: boolean;
   onBusyChange: (busy: boolean) => void;
+  onAvailableVersionChange: (version: string | null) => void;
 }) {
   return (
     <Dialog
@@ -40,20 +41,24 @@ export default function AboutDialog({
           <h2 id="about-title" data-dialog-title tabIndex={-1}>
             25小厨
           </h2>
-          <p className="about-version">25小厨版本：{version}（开发预览）</p>
-          <p className="about-version">
-            内置 SillyTavern 版本：{sillyTavernVersion}
-          </p>
         </div>
       </div>
-      <UpdatePanel disabled={disabled} onBusyChange={onBusyChange} />
-      <Button
-        className="about-contact contact-trigger"
-        aria-haspopup="dialog"
-        onClick={onContact}
-      >
-        联系开发者
-      </Button>
+      <div className="about-versions">
+        <p className="about-version">
+          <span>25小厨版本</span>
+          <span>{version}</span>
+        </p>
+        <p className="about-version">
+          <span>内置 SillyTavern</span>
+          <span>{sillyTavernVersion}</span>
+        </p>
+      </div>
+      <UpdatePanel
+        disabled={disabled}
+        onBusyChange={onBusyChange}
+        onAvailableVersionChange={onAvailableVersionChange}
+      />
+      <DeveloperContact />
     </Dialog>
   );
 }

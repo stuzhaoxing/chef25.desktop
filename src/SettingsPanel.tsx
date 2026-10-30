@@ -1,3 +1,4 @@
+import { DEFAULT_TAVERN_PORT } from "./defaults";
 import ConfirmationDialog from "./components/ConfirmationDialog";
 import SectionHeading from "./components/SectionHeading";
 import Button from "./components/Button";
@@ -7,8 +8,6 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 
 import { SlidersHorizontal, RotateCcw } from "lucide-react";
 
-import RemoteAccessPanel from "./RemoteAccessPanel";
-
 type LaunchSettings = { port: number };
 
 export default function SettingsPanel({
@@ -16,17 +15,13 @@ export default function SettingsPanel({
   running,
   url,
   onBusyChange,
-  showGuide,
-  onShowGuideChange,
 }: {
   disabled: boolean;
   running: boolean;
   url: string;
   onBusyChange: (busy: boolean) => void;
-  showGuide: boolean;
-  onShowGuideChange: (value: boolean) => void;
 }) {
-  const [port, setPort] = useState("25252");
+  const [port, setPort] = useState(String(DEFAULT_TAVERN_PORT));
   const [loading, setLoading] = useState(isTauri());
   const [saving, setSaving] = useState(false);
   const inFlight = useRef(false);
@@ -118,45 +113,19 @@ export default function SettingsPanel({
 
   return (
     <section className="detail settings-panel">
-      <section className="settings-card" aria-labelledby="display-heading">
-        <SectionHeading id="display-heading" icon={SlidersHorizontal}>
-          界面显示
-        </SectionHeading>
-        <div className="settings-row">
-          <div className="settings-copy">
-            <p id="guide-toggle-label">显示中文文档</p>
-            <p id="guide-toggle-help">
-              在侧栏显示「中文文档」，关闭后可随时在这里恢复。
-            </p>
-          </div>
-          <Button
-            type="button"
-            role="switch"
-            aria-checked={showGuide}
-            aria-labelledby="guide-toggle-label"
-            aria-describedby="guide-toggle-help"
-            className={showGuide ? "primary" : ""}
-            onClick={() => onShowGuideChange(!showGuide)}
-          >
-            {showGuide ? "已开启" : "已关闭"}
-          </Button>
-        </div>
-      </section>
       <section className="settings-card" aria-labelledby="launch-heading">
-        <SectionHeading id="launch-heading" icon={SlidersHorizontal}>
-          启动设置
-        </SectionHeading>
         <form onSubmit={(event) => void save(event)}>
           <fieldset
-            className="settings-row"
+            className="settings-row launch-settings-row"
             disabled={disabled || loading || saving || resetting}
           >
-            <div className="settings-copy">
-              <label htmlFor="launch-port">启动端口</label>
-            </div>
+            <SectionHeading id="launch-heading" icon={SlidersHorizontal}>
+              启动端口
+            </SectionHeading>
             <div className="settings-controls">
               <input
                 id="launch-port"
+                aria-labelledby="launch-heading"
                 readOnly={running}
                 type="number"
                 min="1024"
@@ -184,11 +153,6 @@ export default function SettingsPanel({
           </p>
         )}
       </section>
-      <RemoteAccessPanel
-        disabled={disabled || loading || saving || resetting}
-        running={running}
-        onBusyChange={onBusyChange}
-      />
       <section
         className="settings-card reset-card"
         aria-labelledby="reset-heading"

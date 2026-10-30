@@ -1,4 +1,5 @@
 mod backup;
+mod managed_remote;
 mod remote;
 mod service;
 mod storage;
@@ -15,8 +16,6 @@ use tauri::{
 use tauri_plugin_dialog::DialogExt;
 
 fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
-    #[cfg(target_os = "macos")]
-    app.set_dock_visibility(true)?;
     if let Some(window) = app.get_window("main") {
         window.unminimize()?;
         window.show()?;
@@ -87,12 +86,6 @@ fn quit_app(window: tauri::Webview, app: tauri::AppHandle) -> Result<(), String>
 fn open_developer_issues(window: tauri::Webview) -> Result<(), String> {
     require_launcher(&window)?;
     open_fixed_url("https://github.com/stuzhaoxing/chef25.desktop/issues")
-}
-
-#[tauri::command]
-fn open_openfrp_console(window: tauri::Webview) -> Result<(), String> {
-    require_launcher(&window)?;
-    open_fixed_url("https://console.openfrp.net/")
 }
 
 fn open_fixed_url(url: &str) -> Result<(), String> {
@@ -228,6 +221,14 @@ async fn save_launch_settings(
 }
 
 #[tauri::command]
+async fn remote_capacity(window: tauri::Webview) -> Result<managed_remote::Capacity, String> {
+    require_launcher(&window)?;
+    tauri::async_runtime::spawn_blocking(managed_remote::capacity)
+        .await
+        .map_err(|_| "容量查询任务异常")?
+}
+
+#[tauri::command]
 async fn remote_status(
     window: tauri::Webview,
     service: State<'_, Arc<Service>>,
@@ -255,11 +256,10 @@ async fn stop_remote(
 async fn start_remote(
     window: tauri::Webview,
     service: State<'_, Arc<Service>>,
-    request: remote::RemoteRequest,
 ) -> Result<remote::RemoteStatus, String> {
     require_launcher(&window)?;
     let service = Arc::clone(service.inner());
-    tauri::async_runtime::spawn_blocking(move || service.start_remote(request))
+    tauri::async_runtime::spawn_blocking(move || service.start_remote())
         .await
         .map_err(|_| "远程访问任务异常")?
 }
@@ -463,8 +463,13 @@ pub fn run() {
     // Unbundled `tauri dev` launches use the process name for the Dock label.
     // Set it before AppKit registers the application with Launch Services.
     #[cfg(target_os = "macos")]
-    objc2_foundation::NSProcessInfo::processInfo()
-        .setProcessName(&objc2_foundation::NSString::from_str("25小厨"));
+    objc2_foundation::NSProcessInfo::processInfo().setProcessName(
+        &objc2_foundation::NSString::from_str(if cfg!(debug_assertions) {
+            "25小厨 Dev"
+        } else {
+            "25小厨"
+        }),
+    );
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -496,7 +501,7 @@ pub fn run() {
             list_storage,
             preview_storage,
             launch_settings,
-            open_openfrp_console,
+            remote_capacity,
             remote_status,
             start_remote,
             stop_remote,
@@ -521,14 +526,8 @@ pub fn run() {
                 // Closing only folds away the window; the tavern keeps running.
                 api.prevent_close();
                 if let Some(window) = app.get_window("main") {
-                    if let Err(error) = window.hide() {
-                        eprintln!("Unable to hide main window: {error}");
-                        #[cfg(target_os = "macos")]
-                        return;
-                    }
-                    #[cfg(target_os = "macos")]
-                    if let Err(error) = app.set_dock_visibility(false) {
-                        eprintln!("Unable to hide Dock icon: {error}");
+                    if let Err(error) = window.minimize() {
+                        eprintln!("Unable to minimize main window: {error}");
                     }
                 }
             }
