@@ -122,15 +122,17 @@ def main():
             verify_app(extracted / APP.name)
             run(['xcrun', 'stapler', 'validate', str(extracted / APP.name)])
             run(['spctl', '--assess', '--type', 'execute', str(extracted / APP.name)])
-            image_root = temp / 'image'
-            image_root.mkdir()
-            run(['ditto', str(APP), str(image_root / APP.name)])
-            (image_root / 'Applications').symlink_to('/Applications')
             dmg_directory = BUNDLE / 'dmg'
             dmg_directory.mkdir(exist_ok=True)
             version = json.loads((ROOT / 'package.json').read_text())['version']
             dmg = dmg_directory / f'Chef25_{version}_darwin-universal.dmg'
-            run(['hdiutil', 'create', '-volname', '25小厨', '-srcfolder', str(image_root), '-ov', '-format', 'UDZO', str(dmg)])
+            # Write Finder layout directly; no Apple Events permission is needed in CI.
+            run([sys.executable, '-m', 'dmgbuild',
+                 '-s', str(ROOT / 'src-tauri/dmg/dmgbuild.py'),
+                 '-D', f'app={APP}',
+                 '-D', f'background={ROOT / "src-tauri/dmg/background.png"}',
+                 '-D', f'icon={ROOT / "src-tauri/icons/icon.icns"}',
+                 '25小厨', str(dmg)])
             run(['codesign', '--force', '--timestamp', '--sign', IDENTITY, *keychain_args, str(dmg)])
             notarize(dmg, dmg)
             run(['codesign', '--verify', '--strict', str(dmg)])

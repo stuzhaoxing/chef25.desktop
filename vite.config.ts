@@ -9,6 +9,9 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 25251,
     strictPort: true,
+    proxy: {
+      "/api/tavern-guide": "http://127.0.0.1:25250",
+    },
     watch: { ignored: ["**/src-tauri/**"] },
   },
   preview: { host: "127.0.0.1", port: 25253, strictPort: true },

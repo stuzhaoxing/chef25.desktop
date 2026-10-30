@@ -14,14 +14,14 @@
       {
         "label": "main",
         "title": "25小厨",
-        "width": 960,
-        "height": 720,
+        "width": 860,
+        "height": 640,
         "minWidth": 720,
         "minHeight": 620
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'self'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; connect-src ipc: http://ipc.localhost https://www.chef25.com/api/tavern-guide; object-src 'none'; frame-src https://www.chef25.com/guides/sillytavern https://www.chef25.com/guides/sillytavern/; base-uri 'self'"
     }
   },
   "bundle": {
@@ -34,7 +34,22 @@
     "shortDescription": "Your SillyTavern desktop companion",
     "copyright": "Copyright Chef25 contributors",
     "macOS": {
-      "minimumSystemVersion": "13.5"
+      "minimumSystemVersion": "13.5",
+      "dmg": {
+        "background": "dmg/background.png",
+        "windowSize": {
+          "width": 680,
+          "height": 460
+        },
+        "appPosition": {
+          "x": 200,
+          "y": 205
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 205
+        }
+      }
     },
     "windows": {
       "nsis": {
@@ -47,7 +62,8 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
-      "icons/icon.ico"
+      "icons/icon.ico",
+      "icons/Assets.car"
     ],
     "createUpdaterArtifacts": true
   },

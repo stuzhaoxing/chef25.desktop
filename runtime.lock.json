@@ -19,5 +19,23 @@
         "sha256": "d2046d28c2c3dcd211ac5145c0bf30e2047ef9dfb306693c8c6e2eccd8b95fa5"
       }
     }
+  },
+  "openfrp": {
+    "version": "OF_0.68.0_37f78258_260326",
+    "baseUrl": "https://staticassets.naids.com/client/OF_0.68.0_37f78258_260326/",
+    "archives": {
+      "darwin-arm64": {
+        "file": "frpc_darwin_arm64.tar.gz",
+        "sha256": "f64f98d05d5da0f81ba56fbfa6e4e80d64a6cc3ef387242bada4a49210d1578e"
+      },
+      "darwin-amd64": {
+        "file": "frpc_darwin_amd64.tar.gz",
+        "sha256": "27a0fb49dbc852196cb8f8b855fa8c482ea50fea196c150ec39d576042674dc6"
+      },
+      "windows-amd64": {
+        "file": "frpc_windows_amd64.zip",
+        "sha256": "48705664b9d9246098c93a6b51a8d27409fd5d9f6b475808032c4a946e4be08d"
+      }
+    }
   }
 }

@@ -12,6 +12,14 @@ import { sha256 } from "./runtime-utils.mjs";
 import { verifyUpdateSignature } from "./verify-update-signature.mjs";
 
 const root = process.cwd();
+const downloadOrigin = process.env.CHEF25_DOWNLOAD_ORIGIN;
+if (
+  !downloadOrigin ||
+  !/^https:\/\/[a-z0-9]+(?:[.-][a-z0-9]+)+$/.test(downloadOrigin)
+)
+  throw new Error(
+    "Set CHEF25_DOWNLOAD_ORIGIN to the HTTPS custom download origin (no path or trailing slash)",
+  );
 const { version } = JSON.parse(await readFile("package.json", "utf8"));
 if (!/^\d+\.\d+\.\d+$/.test(version))
   throw new Error(
@@ -19,6 +27,10 @@ if (!/^\d+\.\d+\.\d+$/.test(version))
   );
 const output = path.join(root, "artifacts/distribution");
 await mkdir(output, { recursive: true });
+if ((await readdir(output)).length)
+  throw new Error(
+    "Distribution directory must be empty; reuse the existing distribution for publication retries",
+  );
 const platforms = {};
 const updates = {};
 const config = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
@@ -100,7 +112,7 @@ await writeFile(
         Object.entries(aliases).map(([target, id]) => [
           target,
           {
-            url: "https://www.chef25.com" + updates[id].url,
+            url: downloadOrigin + updates[id].url,
             signature: updates[id].signature,
           },
         ]),
