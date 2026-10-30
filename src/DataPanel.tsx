@@ -4,7 +4,7 @@ import EmptyState from "./components/EmptyState";
 import SectionHeading from "./components/SectionHeading";
 import Button from "./components/Button";
 import { message } from "./message";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   ArrowUp,
@@ -73,6 +73,7 @@ function entryIcon(entry: Entry): LucideIcon {
     : "";
   return EXTENSION_ICONS[ext] ?? File;
 }
+const nameCollator = new Intl.Collator("zh-CN", { numeric: true });
 const modifiedFormat = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric",
   month: "2-digit",
@@ -209,18 +210,21 @@ export default function DataPanel({
     setRevision((r) => r + 1);
   }
   const parts = path.split("/").filter(Boolean);
-  const visible = entries
-    .filter((entry) =>
-      entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
-    )
-    .sort((a, b) => {
-      const folders =
-        Number(a.kind !== "directory") - Number(b.kind !== "directory");
-      if (folders) return folders;
-      if (sort === "modified") return (b.modified ?? 0) - (a.modified ?? 0);
-      if (sort === "size") return b.size - a.size;
-      return a.name.localeCompare(b.name, "zh-CN", { numeric: true });
-    });
+  const visible = useMemo(() => {
+    const normalizedQuery = query.toLocaleLowerCase();
+    return entries
+      .filter((entry) =>
+        entry.name.toLocaleLowerCase().includes(normalizedQuery),
+      )
+      .sort((a, b) => {
+        const folders =
+          Number(a.kind !== "directory") - Number(b.kind !== "directory");
+        if (folders) return folders;
+        if (sort === "modified") return (b.modified ?? 0) - (a.modified ?? 0);
+        if (sort === "size") return b.size - a.size;
+        return nameCollator.compare(a.name, b.name);
+      });
+  }, [entries, query, sort]);
   return (
     <section className="data-panel">
       <section className="data-card" aria-labelledby="storage-heading">

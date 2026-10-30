@@ -7,13 +7,14 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU16, Ordering},
-        Mutex, TryLockError,
+        Arc, Mutex, TryLockError,
     },
     thread,
     time::{Duration, Instant},
 };
 
-pub const PORT: u16 = 25252;
+// Debug builds have their own default; saved settings still take precedence.
+pub const PORT: u16 = if cfg!(debug_assertions) { 25272 } else { 25252 };
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchSettings {
@@ -49,11 +50,12 @@ pub struct Status {
 pub struct Service {
     resources: PathBuf,
     data: PathBuf,
-    child: Mutex<Option<Child>>,
+    child: Arc<Mutex<Option<Child>>>,
     updating: AtomicBool,
     shutting_down: AtomicBool,
     port: AtomicU16,
-    remote: Mutex<Option<RemoteProcess>>,
+    remote: Arc<Mutex<Option<RemoteProcess>>>,
+    remote_message: Mutex<String>,
 }
 
 struct RemoteProcess {
@@ -61,13 +63,26 @@ struct RemoteProcess {
     tunnel: Option<Child>,
     _files: tempfile::TempDir,
     public_url: String,
+    password: String,
+    lease_id: String,
+    lease: Option<(
+        crate::managed_remote::Identity,
+        crate::managed_remote::Lease,
+    )>,
+    heartbeat_stop: Option<std::sync::mpsc::Sender<()>>,
 }
 impl Drop for RemoteProcess {
     fn drop(&mut self) {
+        if let Some(stop) = self.heartbeat_stop.take() {
+            let _ = stop.send(());
+        }
         // Close the protected ingress first, even if the relay is unresponsive.
         terminate(&mut self.gateway);
         if let Some(child) = self.tunnel.as_mut() {
             terminate(child);
+        }
+        if let Some((identity, lease)) = self.lease.take() {
+            thread::spawn(move || lease.release(&identity));
         }
     }
 }
@@ -77,11 +92,12 @@ impl Service {
         Self {
             resources,
             data,
-            child: Mutex::new(None),
+            child: Arc::new(Mutex::new(None)),
             updating: AtomicBool::new(false),
             shutting_down: AtomicBool::new(false),
             port: AtomicU16::new(PORT),
-            remote: Mutex::new(None),
+            remote: Arc::new(Mutex::new(None)),
+            remote_message: Mutex::new("远程访问已关闭".into()),
         }
     }
 
@@ -121,7 +137,13 @@ impl Service {
     }
 
     pub fn remote_status(&self) -> Result<crate::remote::RemoteStatus, String> {
-        let mut remote = self.remote.lock().map_err(|_| "远程访问状态异常")?;
+        let mut remote = match self.remote.try_lock() {
+            Ok(remote) => remote,
+            Err(TryLockError::WouldBlock) => {
+                return Ok(crate::remote::disabled("正在连接或关闭远程访问，请稍候"));
+            }
+            Err(TryLockError::Poisoned(_)) => return Err("远程访问状态异常".into()),
+        };
         if let Some(active) = remote.as_mut() {
             let gateway_alive = active
                 .gateway
@@ -136,19 +158,24 @@ impl Service {
                 return Ok(crate::remote::RemoteStatus {
                     enabled: true,
                     public_url: active.public_url.clone(),
+                    password: active.password.clone(),
                     message:
                         "隧道进程运行中；开启时已验证 HTTPS 入口，当前网络可用性请以手机访问为准"
                             .into(),
                 });
             }
             *remote = None;
-            return Ok(crate::remote::disabled("隧道已退出，请检查配置后重新开启"));
+            return Ok(crate::remote::disabled("隧道已退出，请检查网络后重新开启"));
         }
-        Ok(crate::remote::disabled("远程访问已关闭"))
+        Ok(crate::remote::disabled(
+            &self.remote_message.lock().map_err(|_| "远程访问状态异常")?,
+        ))
     }
 
     pub fn stop_remote(&self) -> Result<crate::remote::RemoteStatus, String> {
+        let _service = self.child.lock().map_err(|_| "酒馆状态异常")?;
         self.remote.lock().map_err(|_| "远程访问状态异常")?.take();
+        *self.remote_message.lock().map_err(|_| "远程访问状态异常")? = "远程访问已关闭".into();
         Ok(crate::remote::disabled("远程访问已关闭"))
     }
 
@@ -156,11 +183,15 @@ impl Service {
         self.remote.lock().unwrap_or_else(|e| e.into_inner()).take();
     }
 
-    pub fn start_remote(
-        &self,
-        request: crate::remote::RemoteRequest,
-    ) -> Result<crate::remote::RemoteStatus, String> {
-        let public_url = crate::remote::validate(&request)?;
+    pub fn start_remote(&self) -> Result<crate::remote::RemoteStatus, String> {
+        let result = self.connect_remote();
+        if let Err(error) = &result {
+            *self.remote_message.lock().map_err(|_| "远程访问状态异常")? = error.clone();
+        }
+        result
+    }
+
+    fn connect_remote(&self) -> Result<crate::remote::RemoteStatus, String> {
         // Same lock order as stop/update/shutdown. No tunnel may outlive its service.
         let mut service = self.child.lock().map_err(|_| "酒馆状态异常")?;
         if self.updating.load(Ordering::SeqCst) || self.shutting_down.load(Ordering::SeqCst) {
@@ -173,6 +204,7 @@ impl Service {
         if remote.is_some() {
             return Err("请先关闭当前远程连接".into());
         }
+        let identity = crate::managed_remote::Identity::load(&self.data)?;
         let executable = crate::remote::client(&self.data)?;
         if self.shutting_down.load(Ordering::SeqCst) {
             return Err("小厨正在退出".into());
@@ -212,9 +244,13 @@ impl Service {
             gateway,
             tunnel: None,
             _files: files,
-            public_url: public_url.clone(),
+            public_url: String::new(),
+            password: identity.password.clone(),
+            lease_id: String::new(),
+            lease: None,
+            heartbeat_stop: None,
         };
-        let input = serde_json::json!({ "targetPort": self.port.load(Ordering::SeqCst), "password": request.password, "marker": marker });
+        let input = serde_json::json!({ "targetPort": self.port.load(Ordering::SeqCst), "listenPort": 0, "password": identity.password, "marker": marker });
         writeln!(
             active.gateway.stdin.as_mut().ok_or("入口配置管道不可用")?,
             "{input}"
@@ -233,42 +269,28 @@ impl Service {
             .map_err(|_| "无法读取入口状态")?;
         let ready: serde_json::Value =
             serde_json::from_str(&line).map_err(|_| "访问入口状态无效")?;
+        if ready["error"].is_string() {
+            return Err("本地访问入口不可用，请重试".into());
+        }
         let port = ready["port"]
             .as_u64()
             .and_then(|p| u16::try_from(p).ok())
             .filter(|p| *p > 0)
             .ok_or("入口端口无效")?;
-        let config =
-            crate::remote::configuration(&request.configuration.replace("\r\n", "\n"), port)?;
-        let config_path = active._files.path().join("frpc.ini");
-        let mut file = fs::OpenOptions::new();
-        file.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            file.mode(0o600);
-        }
-        file.open(&config_path)
-            .and_then(|mut f| f.write_all(config.as_bytes()))
-            .map_err(|_| "无法写入临时隧道配置")?;
-        let mut command = Command::new(executable);
-        command
-            .arg("--config")
-            .arg(&config_path)
-            .arg("--noupdate")
-            .current_dir(active._files.path())
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000);
-        }
+        let acquired_at = Instant::now();
+        let lease = crate::managed_remote::Lease::acquire(&identity, port)?;
+        let public_url = lease.public_url.clone();
+        active.public_url = public_url.clone();
+        active.lease_id = lease.lease_id.clone();
+        active.lease = Some((identity.clone(), lease.clone()));
+        // Own the lease before validation so any rejected credential is released.
+        crate::remote::validate_token(&lease.token)?;
+        let mut command =
+            crate::remote::tunnel_command(&executable, active._files.path(), &lease.token)?;
         active.tunnel = Some(
             command
                 .spawn()
-                .map_err(|_| "缺少 OpenFrp 客户端，请准备运行环境或安装新版小厨")?,
+                .map_err(|_| "无法启动 Cloudflare 客户端，请重新开启远程访问")?,
         );
         let client = reqwest::blocking::Client::builder()
             .no_proxy()
@@ -277,7 +299,8 @@ impl Service {
             .build()
             .map_err(|_| "无法验证远程入口")?;
         let mut verified = false;
-        for _ in 0..10 {
+        let mut fresh_dns = None;
+        for attempt in 0..20 {
             if self.shutting_down.load(Ordering::SeqCst) {
                 return Err("小厨正在退出".into());
             }
@@ -289,9 +312,14 @@ impl Service {
                 .map_err(|_| "无法读取隧道状态")?
                 .is_some()
             {
-                return Err("OpenFrp 启动失败，请核对 INI 配置、账号额度和节点状态".into());
+                return Err("Cloudflare 隧道已退出，请检查电脑网络后重试".into());
             }
-            if let Ok(response) = client.get(&public_url).send() {
+            // Retry propagation without trusting a cached wildcard DNS answer.
+            if attempt >= 3 && attempt % 4 == 3 {
+                fresh_dns = crate::remote::fresh_dns_client(&public_url).ok();
+            }
+            let verification_client = fresh_dns.as_ref().unwrap_or(&client);
+            if let Ok(response) = verification_client.get(&public_url).send() {
                 if response.status() == reqwest::StatusCode::UNAUTHORIZED
                     && response
                         .headers()
@@ -305,13 +333,34 @@ impl Service {
             }
             thread::sleep(Duration::from_millis(500));
         }
-        if !verified {
-            return Err("HTTPS 入口验证失败，隧道已关闭。请确认域名和证书有效，且节点将 HTTPS 转发到此 HTTP 隧道".into());
+        if !verified || acquired_at.elapsed() >= Duration::from_secs(90) {
+            return Err(
+                "HTTPS 入口验证失败，隧道已关闭。请稍后重试，或检查当前网络是否可连接 Cloudflare"
+                    .into(),
+            );
         }
         if !matches!(service.as_mut().map(|c| c.try_wait()), Some(Ok(None))) {
             return Err("酒馆已停止，远程连接已取消".into());
         }
+        let (stop, receiver) = std::sync::mpsc::channel();
+        active.heartbeat_stop = Some(stop);
         *remote = Some(active);
+        let weak = Arc::downgrade(&self.remote);
+        let service_weak = Arc::downgrade(&self.child);
+        let lease_id = lease.lease_id.clone();
+        thread::spawn(move || {
+            supervise_remote(
+                weak,
+                service_weak,
+                receiver,
+                &lease_id,
+                acquired_at,
+                (Duration::from_secs(30), Duration::from_secs(90)),
+                || lease.renew(&identity).is_ok(),
+            );
+        });
+        *self.remote_message.lock().map_err(|_| "远程访问状态异常")? =
+            "连接已结束或租约续期失败，可重新开启；停止酒馆会释放隧道".into();
         drop(remote);
         drop(service);
         self.remote_status()
@@ -383,6 +432,7 @@ impl Service {
             .map(|settings| settings.port)
             .unwrap_or(PORT);
         let _reservation = reserve_port(port)?;
+        self.close_remote();
         crate::storage::reset(&self.data)?;
         // The launch port is a user preference and survives a data reset.
         self.port.store(port, Ordering::SeqCst);
@@ -414,6 +464,7 @@ impl Service {
             *guard = None;
         }
         let _reservation = reserve_port(self.settings().map(|s| s.port).unwrap_or(PORT))?;
+        self.close_remote();
         if importing {
             let result = crate::backup::import(&self.data, path)?;
             self.port.store(self.settings()?.port, Ordering::SeqCst);
@@ -459,6 +510,15 @@ impl Service {
             );
         command
             .current_dir(&installed)
+            // Preload without changing upstream argv or modifying vendored files.
+            .arg("--import")
+            .arg(format!(
+                "data:text/javascript;base64,{}",
+                base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    include_str!("../../native/launcher-lifetime.mjs"),
+                )
+            ))
             .arg("server.js")
             .arg("--configPath")
             .arg(self.data.join("config.yaml"))
@@ -487,7 +547,8 @@ impl Service {
             )
             .env("SILLYTAVERN_WHITELISTDOCKERHOSTS", "false")
             .env_remove("NODE_OPTIONS")
-            .stdin(Stdio::null())
+            // Keep this pipe open for the child's entire owned lifetime.
+            .stdin(Stdio::piped())
             .stdout(log)
             .stderr(error_log);
         #[cfg(windows)]
@@ -515,6 +576,9 @@ impl Service {
             return Err(error);
         }
         *guard = Some(child);
+        drop(guard);
+        // Remote access must be requested manually for each tavern session.
+        // Ignore legacy private-remote/enabled files; startup never provisions a tunnel.
         Ok(self.snapshot("running"))
     }
 
@@ -586,10 +650,51 @@ impl Service {
 impl Drop for Service {
     fn drop(&mut self) {
         self.close_remote();
-        if let Ok(guard) = self.child.get_mut() {
+        if let Ok(mut guard) = self.child.lock() {
             if let Some(mut child) = guard.take() {
                 terminate(&mut child);
             }
+        }
+    }
+}
+
+// Native supervision continues when the launcher UI is hidden or suspended.
+fn supervise_remote(
+    remote: std::sync::Weak<Mutex<Option<RemoteProcess>>>,
+    service: std::sync::Weak<Mutex<Option<Child>>>,
+    receiver: std::sync::mpsc::Receiver<()>,
+    lease_id: &str,
+    mut renewed_at: Instant,
+    timing: (Duration, Duration),
+    mut renew: impl FnMut() -> bool,
+) {
+    while receiver.recv_timeout(timing.0) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+        let Some(service) = service.upgrade() else {
+            break;
+        };
+        let service_alive = match service.try_lock() {
+            Ok(mut guard) => matches!(guard.as_mut().map(|c| c.try_wait()), Some(Ok(None))),
+            Err(TryLockError::WouldBlock) => true,
+            Err(TryLockError::Poisoned(_)) => false,
+        };
+        if service_alive && renew() {
+            renewed_at = Instant::now();
+        }
+        let Some(remote) = remote.upgrade() else {
+            break;
+        };
+        let mut guard = remote.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(active) = guard.as_mut() else {
+            break;
+        };
+        if active.lease_id != lease_id {
+            break;
+        }
+        let gateway_alive = matches!(active.gateway.try_wait(), Ok(None));
+        let tunnel_alive = matches!(active.tunnel.as_mut().map(|c| c.try_wait()), Some(Ok(None)));
+        if !service_alive || !gateway_alive || !tunnel_alive || renewed_at.elapsed() >= timing.1 {
+            *guard = None;
+            break;
         }
     }
 }
@@ -738,6 +843,114 @@ fn copy_tree(source: &Path, destination: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn remote_supervision_closes_expired_leases_and_dead_services_without_ui_polling() {
+        for dead_service in [false, true] {
+            let data = tempfile::tempdir().unwrap();
+            let service = Service::new(PathBuf::new(), data.path().to_path_buf());
+            let tavern = Command::new("sleep").arg("30").spawn().unwrap();
+            *service.child.lock().unwrap() = Some(tavern);
+            if dead_service {
+                terminate(service.child.lock().unwrap().as_mut().unwrap());
+            }
+            let gateway = Command::new("sleep").arg("30").spawn().unwrap();
+            let tunnel = Command::new("sleep").arg("30").spawn().unwrap();
+            let pids = [gateway.id(), tunnel.id()];
+            *service.remote.lock().unwrap() = Some(RemoteProcess {
+                gateway,
+                tunnel: Some(tunnel),
+                _files: tempfile::tempdir().unwrap(),
+                public_url: String::new(),
+                password: String::new(),
+                lease_id: "test-lease".into(),
+                lease: None,
+                heartbeat_stop: None,
+            });
+            let (_sender, receiver) = std::sync::mpsc::channel();
+            supervise_remote(
+                Arc::downgrade(&service.remote),
+                Arc::downgrade(&service.child),
+                receiver,
+                "test-lease",
+                Instant::now() - Duration::from_secs(2),
+                (Duration::from_millis(1), Duration::from_secs(1)),
+                || false,
+            );
+            assert!(service.remote.lock().unwrap().is_none());
+            for pid in pids {
+                assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_renewal_keeps_running_without_ui_until_tavern_stops() {
+        let data = tempfile::tempdir().unwrap();
+        let service = Service::new(PathBuf::new(), data.path().to_path_buf());
+        *service.child.lock().unwrap() = Some(Command::new("sleep").arg("30").spawn().unwrap());
+        *service.remote.lock().unwrap() = Some(RemoteProcess {
+            gateway: Command::new("sleep").arg("30").spawn().unwrap(),
+            tunnel: Some(Command::new("sleep").arg("30").spawn().unwrap()),
+            _files: tempfile::tempdir().unwrap(),
+            public_url: String::new(),
+            password: String::new(),
+            lease_id: "renewing-lease".into(),
+            lease: None,
+            heartbeat_stop: None,
+        });
+        let (_sender, receiver) = std::sync::mpsc::channel();
+        let mut renewals = 0;
+        supervise_remote(
+            Arc::downgrade(&service.remote),
+            Arc::downgrade(&service.child),
+            receiver,
+            "renewing-lease",
+            Instant::now() - Duration::from_secs(2),
+            (Duration::from_millis(1), Duration::from_secs(1)),
+            || {
+                renewals += 1;
+                assert!(service.remote.lock().unwrap().is_some());
+                if renewals == 3 {
+                    terminate(service.child.lock().unwrap().as_mut().unwrap());
+                }
+                true
+            },
+        );
+        assert_eq!(renewals, 3);
+        assert!(service.remote.lock().unwrap().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn old_heartbeat_cannot_close_a_new_remote_session() {
+        let data = tempfile::tempdir().unwrap();
+        let service = Service::new(PathBuf::new(), data.path().to_path_buf());
+        *service.child.lock().unwrap() = Some(Command::new("sleep").arg("30").spawn().unwrap());
+        *service.remote.lock().unwrap() = Some(RemoteProcess {
+            gateway: Command::new("sleep").arg("30").spawn().unwrap(),
+            tunnel: Some(Command::new("sleep").arg("30").spawn().unwrap()),
+            _files: tempfile::tempdir().unwrap(),
+            public_url: String::new(),
+            password: String::new(),
+            lease_id: "new-lease".into(),
+            lease: None,
+            heartbeat_stop: None,
+        });
+        let (_sender, receiver) = std::sync::mpsc::channel();
+        supervise_remote(
+            Arc::downgrade(&service.remote),
+            Arc::downgrade(&service.child),
+            receiver,
+            "old-lease",
+            Instant::now() - Duration::from_secs(2),
+            (Duration::from_millis(1), Duration::from_secs(1)),
+            || false,
+        );
+        assert!(service.remote.lock().unwrap().is_some());
+    }
+
     #[test]
     fn mobile_addresses_exclude_virtual_network_ids_and_public_ips() {
         for (ip, expected) in [
@@ -850,7 +1063,10 @@ mod tests {
 
     #[test]
     fn legacy_modes_preserve_port_and_are_removed_when_saved() {
-        assert_eq!(LaunchSettings::default().port, 25252);
+        assert_eq!(
+            LaunchSettings::default().port,
+            if cfg!(debug_assertions) { 25272 } else { 25252 }
+        );
         for automatic in [true, false] {
             let settings: LaunchSettings =
                 serde_json::from_str(&format!(r#"{{"automatic":{automatic},"port":31000}}"#))
@@ -915,7 +1131,8 @@ mod tests {
     #[test]
     fn remote_children_are_reaped_by_stop_update_and_shutdown() {
         for action in ["stop", "update", "shutdown", "remote"] {
-            let service = Service::new(PathBuf::new(), PathBuf::new());
+            let data = tempfile::tempdir().unwrap();
+            let service = Service::new(PathBuf::new(), data.path().canonicalize().unwrap());
             let gateway = Command::new("sleep").arg("30").spawn().unwrap();
             let tunnel = Command::new("sleep").arg("30").spawn().unwrap();
             let pids = [gateway.id(), tunnel.id()];
@@ -924,6 +1141,10 @@ mod tests {
                 tunnel: Some(tunnel),
                 _files: tempfile::tempdir().unwrap(),
                 public_url: "https://example.com/".into(),
+                password: String::new(),
+                lease_id: String::new(),
+                lease: None,
+                heartbeat_stop: None,
             });
             match action {
                 "stop" => {
@@ -1009,7 +1230,22 @@ mod tests {
         assert_eq!(stopped.phase, "stopped");
         assert!(stopped.lan_urls.is_empty());
         assert!(reserve_port(test_port).is_ok());
+        // Legacy auto-connect preferences must not trigger any remote setup.
+        fs::create_dir_all(root.join("private-remote")).unwrap();
+        fs::write(root.join("private-remote/enabled"), b"enabled").unwrap();
+        fs::write(root.join("private-remote/identity.json"), b"broken").unwrap();
         assert_eq!(service.start().unwrap().phase, "running");
+        let remote = service.remote_status().unwrap();
+        assert!(!remote.enabled);
+        assert_eq!(remote.message, "远程访问已关闭");
+        // Only an explicit request reads the identity; its failure leaves tavern running.
+        assert!(service
+            .start_remote()
+            .err()
+            .unwrap()
+            .contains("设备凭据损坏"));
+        assert_eq!(service.status().unwrap().phase, "running");
+        service.stop_remote().unwrap();
         assert_eq!(fs::read(root.join("config.yaml")).unwrap(), config);
         assert_eq!(
             fs::read_to_string(root.join("data/chef25-preservation-test")).unwrap(),
@@ -1034,6 +1270,19 @@ mod tests {
         assert!(reserve_port(test_port).is_ok());
         // Reopening the launcher can immediately reuse the same port and data.
         let reopened = Service::new(service.resources.clone(), root.clone());
+        assert_eq!(reopened.start().unwrap().phase, "running");
+        // Simulate forced launcher termination: the OS closes its pipe handles.
+        {
+            let mut guard = reopened.child.lock().unwrap();
+            let child = guard.as_mut().unwrap();
+            drop(child.stdin.take());
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while child.try_wait().unwrap().is_none() {
+                assert!(Instant::now() < deadline, "orphaned tavern did not exit");
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+        assert!(reserve_port(test_port).is_ok());
         assert_eq!(reopened.start().unwrap().phase, "running");
         assert_eq!(fs::read(root.join("config.yaml")).unwrap(), config);
         assert_eq!(

@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; connect-src ipc: http://ipc.localhost https://www.chef25.com/api/tavern-guide; object-src 'none'; frame-src https://www.chef25.com/guides/sillytavern https://www.chef25.com/guides/sillytavern/; base-uri 'self'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src https://www.chef25.com/guides/sillytavern https://www.chef25.com/guides/sillytavern/; base-uri 'self'"
     }
   },
   "bundle": {

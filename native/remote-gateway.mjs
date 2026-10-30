@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 // Configuration arrives through a pipe, never command arguments or a log file.
 const lines = createInterface({ input: process.stdin });
 lines.once("line", (line) => {
-  const { targetPort, password, marker } = JSON.parse(line);
+  const { targetPort, listenPort = 0, password, marker } = JSON.parse(line);
   const digest = (value) => createHash("sha256").update(value).digest();
   const expected = digest(
     "Basic " + Buffer.from(`chef25:${password}`).toString("base64"),
@@ -41,6 +41,10 @@ lines.once("line", (line) => {
       if (
         name.startsWith("x-forwarded-") ||
         [
+          "cf-connecting-ip",
+          "cf-connecting-ipv6",
+          "true-client-ip",
+          "cf-access-jwt-assertion",
           "forwarded",
           "x-real-ip",
           "authorization",
@@ -65,6 +69,7 @@ lines.once("line", (line) => {
           "Cache-Control": "no-store",
           "X-Chef25-Gateway": marker,
         });
+        res.flushHeaders();
         response.pipe(res); // No buffering: preserve SSE and large uploads.
         response.on("error", () => res.destroy());
       },
@@ -79,12 +84,17 @@ lines.once("line", (line) => {
   });
   // No unauthenticated upgrade path. SillyTavern streams over HTTP/SSE.
   server.on("upgrade", (_req, socket) => socket.destroy());
-  server.listen(0, "127.0.0.1", () =>
+  server.listen(listenPort, "127.0.0.1", () =>
     process.stdout.write(
       JSON.stringify({ port: server.address().port }) + "\n",
     ),
   );
-  server.on("error", () => process.exit(1));
+  server.on("error", () => {
+    process.stdout.write(
+      JSON.stringify({ error: "listen_failed" }) + "\n",
+      () => process.exit(1),
+    );
+  });
 });
 // A lost launcher pipe also closes the gateway after a launcher crash.
 lines.on("close", () => process.exit(0));

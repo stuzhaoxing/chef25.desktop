@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 
 // Keep children mounted: updates and pending operations must survive closing.
 export default function Dialog({
+  id,
   open,
   onClose,
   busy = false,
@@ -11,6 +12,7 @@ export default function Dialog({
   focusTitle = false,
   children,
 }: {
+  id?: string;
   open: boolean;
   onClose: () => void;
   busy?: boolean;
@@ -34,6 +36,7 @@ export default function Dialog({
   }, [open, focusTitle]);
   return (
     <dialog
+      id={id}
       ref={dialog}
       className={className}
       aria-labelledby={labelledBy}

@@ -27,8 +27,8 @@ Exact Node version is recorded in `.node-version`; runtime provenance is recorde
 
 Before releasing, review all transitive dependency notices and any platform signing requirements. Build artifacts alone are not evidence of that review.
 
-## Optional OpenFrp client
+## Optional Cloudflare Tunnel client
 
-Remote access optionally downloads OpenFrp FRPC `OF_0.68.0_37f78258_260326` directly from the official HTTPS resource service. Archive SHA-256 values and platform filenames are pinned in `runtime.lock.json`. The client is not included in the installer; the upstream launcher UI/code is not copied into this project. OpenFrp's modified client/service terms must not be confused with the Apache-2.0 license of upstream fatedier/frp. See https://www.openfrp.net/policy/ and https://docs.openfrp.net/use/frpc.
+Remote access optionally downloads Cloudflare `cloudflared` **2026.10.6** directly from the official [GitHub Release](https://github.com/cloudflare/cloudflared/releases/tag/2026.10.6). Platform asset names and SHA-256 digests are pinned in `runtime.lock.json`. This client is not included in the installer. cloudflared is licensed under [Apache-2.0](https://github.com/cloudflare/cloudflared/blob/2026.10.6/LICENSE); its upstream source and third-party notices remain available in that repository. No Cloudflare dashboard UI/code is copied into this project.
 
-This project is community developed; OpenFrp is not responsible for technical support other than node issues. The application does not implement the OpenFrp account-management OPENAPI. Future commercial OPENAPI integration requires the provider's written authorization under its published API terms.
+Chef25 is an independent community project. Cloudflare accounts, domains and service usage remain subject to Cloudflare's terms. A tunnel connector token is not an account API token; this integration does not create accounts, register domains, buy plans or administer account-wide resources.

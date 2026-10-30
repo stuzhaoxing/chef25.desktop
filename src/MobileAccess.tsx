@@ -1,48 +1,65 @@
-import AddressShare from "./components/AddressShare";
-import { useState } from "react";
+import { ChevronRight, Smartphone, X } from "lucide-react";
+import Button, { IconButton } from "./components/Button";
+import Dialog from "./components/Dialog";
+import RemoteAccessPanel from "./RemoteAccessPanel";
 
-export default function MobileAccess({ urls }: { urls: string[] }) {
-  const [selected, setSelected] = useState("");
-  const url = urls.includes(selected) ? selected : (urls[0] ?? "");
-
+export default function MobileAccess({
+  open,
+  onOpen,
+  onClose,
+  ...props
+}: {
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  urls: string[];
+  disabled: boolean;
+  onBusyChange: (busy: boolean) => void;
+}) {
   return (
-    <section className="mobile-access" aria-label="手机访问酒馆">
-      <h2>手机扫码聊天</h2>
-      {url ? (
-        <>
-          <p>手机与电脑连接同一 Wi-Fi</p>
-          {urls.length > 1 && (
-            <select
-              aria-label="选择电脑的局域网地址"
-              value={url}
-              onChange={(event) => {
-                setSelected(event.target.value);
-              }}
-            >
-              {urls.map((address) => (
-                <option key={address} value={address}>
-                  {address}
-                </option>
-              ))}
-            </select>
-          )}
-          <AddressShare
-            url={url}
-            title="手机扫码打开酒馆聊天"
-            label="手机访问地址"
-            qrClassName="mobile-qr"
-            level="M"
-            copyLabel="复制地址"
-            showCopyIcon
+    <>
+      <Button
+        className="mobile-access-trigger"
+        icon={Smartphone}
+        iconSize={18}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls="mobile-access-dialog"
+        onClick={onOpen}
+      >
+        <span>手机访问</span>
+        <ChevronRight size={15} aria-hidden="true" />
+      </Button>
+      <Dialog
+        id="mobile-access-dialog"
+        open={open}
+        onClose={onClose}
+        className="mobile-access-dialog"
+        labelledBy="mobile-access-title"
+        describedBy="mobile-access-description"
+        focusTitle
+      >
+        <header className="mobile-access-header">
+          <div className="mobile-access-title-icon">
+            <Smartphone size={23} aria-hidden="true" />
+          </div>
+          <div>
+            <h2 id="mobile-access-title" data-dialog-title tabIndex={-1}>
+              手机访问
+            </h2>
+            <p id="mobile-access-description">
+              用手机继续聊天，电脑和酒馆需保持运行。
+            </p>
+          </div>
+          <IconButton
+            className="mobile-access-close"
+            icon={X}
+            label="关闭手机访问"
+            onClick={onClose}
           />
-          <p>
-            同一局域网内可访问此酒馆，请在可信网络使用。无法打开时请检查电脑防火墙
-            {urls.length > 1 ? "，或切换上方地址" : ""}。
-          </p>
-        </>
-      ) : (
-        <p>未检测到局域网地址，连接 Wi-Fi 后即可扫码。</p>
-      )}
-    </section>
+        </header>
+        <RemoteAccessPanel {...props} open={open} />
+      </Dialog>
+    </>
   );
 }

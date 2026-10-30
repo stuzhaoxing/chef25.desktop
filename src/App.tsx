@@ -1,3 +1,4 @@
+import { DEFAULT_TAVERN_PORT } from "./defaults";
 import BrandMark from "./components/BrandMark";
 import Button from "./components/Button";
 import { message } from "./message";
@@ -9,7 +10,6 @@ import GuidePanel from "./GuidePanel";
 import ChefMascot from "./ChefMascot";
 import TavernView from "./TavernView";
 import SettingsPanel from "./SettingsPanel";
-import ContactDialog from "./ContactDialog";
 import AboutDialog from "./AboutDialog";
 import {
   CircleHelp,
@@ -31,37 +31,21 @@ type Status = {
 };
 const initial: Status = {
   phase: "stopped",
-  url: "http://127.0.0.1:25252",
+  url: `http://127.0.0.1:${DEFAULT_TAVERN_PORT}`,
   lanUrls: [],
   dataDir: "",
   bundled: false,
 };
 
 export default function App() {
-  const [showGuide, setShowGuide] = useState(() => {
-    try {
-      return localStorage.getItem("chef25.showGuide") !== "false";
-    } catch {
-      return true;
-    }
-  });
-  function changeShowGuide(value: boolean) {
-    try {
-      localStorage.setItem("chef25.showGuide", String(value));
-    } catch {
-      message.error("无法保存显示设置，请重试。");
-      return;
-    }
-    setShowGuide(value);
-    if (!value && tab === "help") setTab("settings");
-  }
   const [status, setStatus] = useState<Status>(initial);
   const [tab, setTab] = useState("tavern");
   const [entered, setEntered] = useState(false);
   const [busy, setBusy] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [contactOpen, setContactOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [availableVersion, setAvailableVersion] = useState<string | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
   const inFlight = useRef(false);
   const native = isTauri();
@@ -69,6 +53,7 @@ export default function App() {
     entered && status.phase === "running" && tab === "tavern";
   const wasRunning = useRef(false);
   const running = status.phase === "running";
+  if (!running && mobileOpen) setMobileOpen(false);
   useEffect(() => {
     if (!native || wasRunning.current === running) return;
     wasRunning.current = running;
@@ -137,23 +122,21 @@ export default function App() {
             { id: "data", label: "本地数据", icon: FolderHeart },
             { id: "help", label: "中文文档", icon: CircleHelp },
             { id: "settings", label: "设置", icon: Settings },
-          ]
-            .filter(({ id }) => id !== "help" || showGuide)
-            .map(({ id, label, icon: Icon }) => (
-              <Button
-                key={id}
-                className={tab === id ? "selected" : ""}
-                disabled={savingSettings}
-                onClick={() => {
-                  setTab(id);
-                  if (id === "tavern" && running) setEntered(true);
-                }}
-                icon={Icon}
-                iconSize={18}
-              >
-                {label}
-              </Button>
-            ))}
+          ].map(({ id, label, icon: Icon }) => (
+            <Button
+              key={id}
+              className={tab === id ? "selected" : ""}
+              disabled={savingSettings}
+              onClick={() => {
+                setTab(id);
+                if (id === "tavern" && running) setEntered(true);
+              }}
+              icon={Icon}
+              iconSize={18}
+            >
+              {label}
+            </Button>
+          ))}
         </nav>
         <div className="sidebar-bottom">
           <div className="service-control">
@@ -181,7 +164,16 @@ export default function App() {
               </Button>
             )}
           </div>
-          {running && <MobileAccess urls={status.lanUrls ?? []} />}
+          {running && (
+            <MobileAccess
+              open={mobileOpen}
+              onOpen={() => setMobileOpen(true)}
+              onClose={() => setMobileOpen(false)}
+              urls={status.lanUrls ?? []}
+              disabled={busy || updating || savingSettings}
+              onBusyChange={setSavingSettings}
+            />
+          )}
           <Button
             className="about-trigger"
             aria-haspopup="dialog"
@@ -189,7 +181,16 @@ export default function App() {
             icon={Info}
             iconSize={18}
           >
-            关于
+            <span>关于</span>
+            {availableVersion && (
+              <span
+                className="about-update-hint"
+                role="status"
+                title={`发现新版本 ${availableVersion}`}
+              >
+                有新版本
+              </span>
+            )}
           </Button>
         </div>
       </aside>
@@ -232,7 +233,7 @@ export default function App() {
         )}
         <TavernView
           key={status.url}
-          visible={tavernVisible && !aboutOpen && !contactOpen}
+          visible={tavernVisible && !aboutOpen && !mobileOpen}
           onError={message.error}
         />
         {tab === "tavern" &&
@@ -267,8 +268,6 @@ export default function App() {
           </section>
         ) : tab === "settings" ? (
           <SettingsPanel
-            showGuide={showGuide}
-            onShowGuideChange={changeShowGuide}
             disabled={busy || updating || status.phase === "starting"}
             running={running}
             url={status.url}
@@ -285,13 +284,12 @@ export default function App() {
           <GuidePanel />
         )}
       </main>
-      <ContactDialog open={contactOpen} onClose={() => setContactOpen(false)} />
       <AboutDialog
-        onContact={() => setContactOpen(true)}
         open={aboutOpen}
         onClose={() => setAboutOpen(false)}
         disabled={busy || savingSettings}
         onBusyChange={setUpdating}
+        onAvailableVersionChange={setAvailableVersion}
       />
     </div>
   );

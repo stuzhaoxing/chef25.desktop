@@ -1,7 +1,6 @@
-import Button from "./components/Button";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CircleCheck, CircleAlert, Info, TriangleAlert, X } from "lucide-react";
+import { CircleCheck, CircleAlert, Info, TriangleAlert } from "lucide-react";
 import { message, useMessages, type MessageItem } from "./message";
 
 const icons = {
@@ -37,13 +36,6 @@ function Message({ item }: { item: MessageItem }) {
     >
       <Icon size={19} aria-hidden="true" />
       <span role={item.type === "error" ? "alert" : "status"}>{item.text}</span>
-      <Button
-        type="button"
-        aria-label="关闭提示"
-        onClick={() => setLeaving(true)}
-        icon={X}
-        iconSize={15}
-      ></Button>
     </div>
   );
 }
