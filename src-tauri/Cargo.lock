@@ -493,7 +493,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "flate2",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "hickory-proto",
  "if-addrs",
  "libc",
