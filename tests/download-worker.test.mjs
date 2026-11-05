@@ -57,13 +57,30 @@ test("full GET streams correct headers and at most two R2 reads", async () => {
 });
 
 test("HEAD reads only metadata and current manifests are never cached", async () => {
+  for (const path of [
+    "/downloads/latest.json",
+    "/downloads/updater.json",
+    "/downloads/mobile/latest.json",
+  ]) {
+    const f = fixture();
+    const response = await f.request(path, { method: "HEAD" });
+    assert.equal(await response.text(), "");
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(f.calls.length, 1);
+  }
+});
+
+test("mobile APKs use immutable paths and support resumable ranges", async () => {
   const f = fixture();
-  const response = await f.request("/downloads/latest.json", {
-    method: "HEAD",
-  });
-  assert.equal(await response.text(), "");
-  assert.equal(response.headers.get("Cache-Control"), "no-store");
-  assert.equal(f.calls.length, 1);
+  const response = await f.request(
+    "/downloads/mobile/v0.1.0/Chef25_0.1.0_android-arm64.apk",
+    { headers: { Range: "bytes=0-0" } },
+  );
+  assert.equal(response.status, 206);
+  assert.equal(await response.text(), "i");
+  assert.equal(response.headers.get("Content-Range"), "bytes 0-0/9");
+  assert.match(response.headers.get("Cache-Control"), /immutable/);
+  assert.equal(f.calls.length, 2);
 });
 
 test("single, suffix and open ranges support download resumption", async () => {
@@ -116,9 +133,12 @@ test("changed If-Range yields full bytes; matching ETag yields 304", async () =>
 test("lock, unknown paths and disabled downloads do not reach R2", async () => {
   for (const path of [
     "/downloads/.publish-lock",
+    "/downloads/mobile/.publish-lock",
+    "/downloads/mobile/other",
     "/",
     "/other",
     "/downloads/v0.1.0/a%2Fb",
+    "/downloads/mobile/v0.1.0/a%2Fb",
     "/downloads/v0.1.0/.secret",
   ]) {
     const f = fixture();

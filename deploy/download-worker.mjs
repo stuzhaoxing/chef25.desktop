@@ -32,12 +32,15 @@ export default {
     if (env.DOWNLOADS_ENABLED !== "true")
       return failure(503, { "Retry-After": "3600" });
     const key = url.pathname.slice(1);
-    const manifest = /^downloads\/(latest|updater)\.json$/.test(key);
-    if (
-      !manifest &&
-      !/^downloads\/v\d+\.\d+\.\d+\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(key)
-    )
-      return failure(404);
+    const manifest =
+      /^downloads\/(?:latest|updater)\.json$/.test(key) ||
+      key === "downloads/mobile/latest.json";
+    const immutable =
+      /^downloads\/v\d+\.\d+\.\d+\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(key) ||
+      /^downloads\/mobile\/v\d+\.\d+\.\d+\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(
+        key,
+      );
+    if (!manifest && !immutable) return failure(404);
     try {
       const meta = await env.DOWNLOADS.head(key);
       if (!meta) return failure(404);

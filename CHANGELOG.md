@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 下载网关增加 Mobile 独立命名空间：`/downloads/mobile/v<version>/` 支持 APK 字节范围请求，`/downloads/mobile/latest.json` 禁用缓存，同时继续拒绝发布锁和其他未知路径。
+
 ## 0.3.4 — 2026-10-30
 
 - 清理旧教程、远程设置等界面遗留样式；原生文件列表排序缓存名称转换，减少大目录排序时的重复分配。

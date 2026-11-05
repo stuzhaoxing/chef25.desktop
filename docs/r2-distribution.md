@@ -15,6 +15,8 @@ GitHub Actions
 官网 / 现有客户端 → www.chef25.com/downloads/{latest,updater}.json
                     → Caddy 只代理小清单 → Pages Functions → 私有 R2
 安装包 / 更新包   → download.chef25.com → Pages Functions (Workers Free) → 私有 R2
+Android APK       → download.chef25.com/downloads/mobile/v<version>/... → 同一 Pages / R2
+Mobile 当前清单    → download.chef25.com/downloads/mobile/latest.json（no-store）
 旧版安装包 URL    → 官网返回 307 → download.chef25.com
 ```
 
@@ -103,6 +105,7 @@ python3 -m venv /tmp/chef25-r2-publish
 
 - R2 对象键保持 `downloads/v<version>/<filename>`。版本文件 `Cache-Control: public, max-age=31536000, immutable`。
 - `downloads/latest.json`、`downloads/updater.json` 为 `Cache-Control: no-store`。不要用 Cache Everything / Edge TTL 规则覆盖它们；若已有覆盖规则，先为这两个完整路径设置缓存绕过。
+- Mobile 使用独立路径 `downloads/mobile/v<version>/` 与 `downloads/mobile/latest.json`；版本文件同样长期缓存，当前清单同样禁用缓存，发布锁 `downloads/mobile/.publish-lock` 不对公网开放。Mobile 发布器与 Desktop 发布器共享整个 R2 bucket 的 9 GB / 10,000 objects 预算。
 - Pages Function 为不可变文件返回长缓存头；这些响应头本身不保证 Function 响应进入 CDN 边缘缓存。不要为未知路径或 404 设置长缓存；不要对下载域名启用交互式挑战，原生更新器无法完成人机验证。
 - 使用 Workers Free 的流式读取，不在内存中拼装安装包；当前未启用 Cache API 边缘缓存。网站读取同源小清单，安装包经导航/原生客户端下载，因此当前流程无需浏览器跨域 CORS 放行。
 - 发布脚本完整读取公开文件并验证 SHA-256、长度和 Range；不会把 HTTP 200 的登录页/挑战页当作安装包。
